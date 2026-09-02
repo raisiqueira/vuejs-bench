@@ -1,0 +1,10 @@
+id: reactive-destructure
+title: Preserve reactivity after destructuring
+category: reactivity
+difficulty: easy
+runtime:
+  node: 24
+  package_manager: pnpm
+checks:
+  - vitest
+  - vue-tsc

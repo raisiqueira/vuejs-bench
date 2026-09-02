@@ -1,0 +1,9 @@
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+
+# Fixture dependencies are installed into disposable starter workspaces.
+tasks/**/starter/node_modules/

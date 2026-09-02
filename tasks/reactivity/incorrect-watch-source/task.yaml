@@ -1,0 +1,10 @@
+id: incorrect-watch-source
+title: Restore a watcher after state changes
+category: reactivity
+difficulty: easy
+runtime:
+  node: 24
+  package_manager: pnpm
+checks:
+  - vitest
+  - vue-tsc

@@ -1,0 +1,10 @@
+id: shallow-ref
+title: Keep an immutable catalog shallow
+category: reactivity
+difficulty: medium
+runtime:
+  node: 24
+  package_manager: pnpm
+checks:
+  - vitest
+  - vue-tsc
