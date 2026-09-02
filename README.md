@@ -19,9 +19,17 @@ Each case flows through these boundaries:
 2. A fresh temporary copy of `starter/` is initialized as a Git repository and dependencies are
    installed.
 3. An `AgentRunner` (currently `CodexRunner`) receives only that workspace and instruction.
-4. After the agent exits, the hidden verifier is copied into the workspace and run with Vitest.
-5. `vue-tsc --noEmit` and the hidden Vitest result become a structured `VerificationResult`.
-6. Pydantic Evals orchestrates the cases and deterministic evaluator report; it does not judge
+4. After the agent exits, the hidden verifier reconstructs a trusted disposable staging Git repo
+   from candidate source plus pristine starter configuration. The hidden verifier is injected
+   afterward through `sbx exec` stdin, so it never appears in host staging.
+5. The verifier creates a uniquely named Docker Sandbox (SBX) microVM with `--clone`. Its private
+   Docker daemon runs the explicit `node:<runtime.node>-bookworm` runtime tag against the cloned
+   workspace, while the host staging tree remains isolated from VM edits.
+6. A Docker named volume owned by that private daemon holds an explicitly installed Corepack
+   0.33.0 and cached pnpm 11.1.1. Dependencies install in a networked setup container; hidden
+   `vue-tsc --noEmit` and Vitest run first and second in separate `--network none` containers,
+   mounting tooling read-only. Their results become a structured `VerificationResult`.
+7. Pydantic Evals orchestrates the cases and deterministic evaluator report; it does not judge
    whether Vue code is correct.
 
 The hidden verifier is absent from the starter copy and is removed after verification. On the
@@ -34,8 +42,9 @@ running Codex unisolated. Linux and other non-macOS hosts are not supported by t
 
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/)
-- Node.js 24+
+- Node.js 24+ (task runtimes below 24 are rejected)
 - pnpm 11+
+- Docker Sandboxes CLI 0.39+ (`sbx`), required for production verification runs
 - An authenticated [Codex CLI](https://developers.openai.com/codex/cli/)
 
 ## Running
@@ -51,9 +60,12 @@ uv run vuebench --task reactive-destructure
 
 Omitting the command defaults to `run`, including when using the Python module entry point.
 `run` creates and cleans up one temporary workspace per task, invokes Codex non-interactively,
-captures its Git diff (including changes committed by the agent), injects hidden tests, and prints
-a readable report. Each trial has a 15-minute timeout by default; use `--timeout` to override it
-and `--model` to pass an optional Codex model override.
+captures its Git diff (including changes committed by the agent), and prints a readable report.
+After Codex exits, verification is fail-closed if SBX cannot create, execute, or clean up its
+microVM; there is no host-grading fallback. Production verification requires SBX 0.39+. The
+remaining solving boundary is macOS Seatbelt around Codex; SBX supplies the clean-room grading
+boundary. Each trial has a 15-minute Codex timeout by default; use `--timeout` to override it and
+`--model` to pass an optional Codex model override.
 
 ## Adding a task
 

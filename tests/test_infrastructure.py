@@ -1,4 +1,6 @@
 import asyncio
+import os
+import re
 import shutil
 import subprocess
 import sys
@@ -8,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 from pydantic_evals.evaluators import EvaluatorContext
 
 from vuebench import cli
@@ -17,7 +20,7 @@ from vuebench.agents.codex import (
     CodexSandboxUnavailable,
 )
 from vuebench.benchmark import Benchmark, BenchmarkExecutionError, DeterministicEvaluator
-from vuebench.models import AgentResult
+from vuebench.models import AgentResult, RuntimeConfig, VerificationResult
 from vuebench.tasks.discovery import discover_tasks, load_task
 from vuebench.tasks.workspace import WorkspaceManager
 from vuebench.verification.runner import HiddenVerifier, parse_verification_result
@@ -45,6 +48,16 @@ def test_task_yaml_and_instruction_are_typed() -> None:
     assert "CounterSummary.vue" in task.instruction
 
 
+def test_runtime_rejects_node_versions_before_supported_floor() -> None:
+    with pytest.raises(ValidationError):
+        RuntimeConfig(node=23)
+
+
+def test_hidden_verifier_rejects_nonpositive_timeout() -> None:
+    with pytest.raises(ValueError, match="must be positive"):
+        HiddenVerifier(command_timeout_seconds=0)
+
+
 class NoInstallWorkspaceManager(WorkspaceManager):
     def install_dependencies(self, workspace: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess([], 0, "", "")
@@ -68,13 +81,23 @@ def test_workspace_is_pristine_and_does_not_mutate_starter() -> None:
 
 class SuccessfulHiddenVerifier(HiddenVerifier):
     def __init__(self) -> None:
-        super().__init__(pnpm_executable="fake-pnpm")
+        super().__init__(sbx_executable="fake-sbx")
         self.commands: list[list[str]] = []
 
-    def _run(self, command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+    def _run(
+        self, command: list[str], *, cwd: Path, input_text: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
         self.commands.append(command)
-        return subprocess.CompletedProcess(command, 0, "ok", "")
+        marker = re.search(r"printf 'VUEBENCH_STATUS:([^:]+):%s", command[-1])
+        output = "ok"
+        if marker:
+            output += f"\nVUEBENCH_STATUS:{marker.group(1)}:0"
+        return subprocess.CompletedProcess(command, 0, output, "")
 
+    @staticmethod
+    def _status_output(command: list[str], status: int) -> str:
+        marker = re.search(r"printf 'VUEBENCH_STATUS:([^:]+):%s", command[-1])
+        return f"ok\nVUEBENCH_STATUS:{marker.group(1)}:{status}" if marker else "ok"
 
 def test_hidden_verifier_is_injected_only_for_checks_and_removed(tmp_path: Path) -> None:
     task = load_task(TASKS_ROOT / "reactivity" / "reactive-destructure" / "task.yaml")
@@ -83,26 +106,241 @@ def test_hidden_verifier_is_injected_only_for_checks_and_removed(tmp_path: Path)
     verifier = SuccessfulHiddenVerifier()
     result = verifier.run(task_verifier=task.verifier_path, workspace=workspace)
     assert result.passed is True
-    assert len(verifier.commands) == 3
-    assert verifier.commands[0] == [
-        "fake-pnpm",
-        "install",
-        "--frozen-lockfile",
-        "--ignore-scripts",
-    ]
-    assert verifier.commands[1][:4] == ["fake-pnpm", "exec", "vitest", "run"]
-    assert verifier.commands[1][4:6] == ["--config", "vite.config.ts"]
-    assert verifier.commands[1][6] == "--passWithNoTests=false"
-    assert verifier.commands[1][7].startswith(".vuebench-hidden-")
-    assert verifier.commands[2] == [
-        "fake-pnpm",
-        "exec",
-        "vue-tsc",
-        "--noEmit",
-        "--project",
-        "tsconfig.json",
-    ]
+    assert len(verifier.commands) == 7
+    create, injection, volume, install, typecheck, tests, cleanup = verifier.commands
+    assert create[:5] == ["fake-sbx", "create", "--clone", "--quiet", "--name"]
+    sandbox_name = create[5]
+    assert sandbox_name.startswith("vuebench-verify-")
+    assert sandbox_name.replace("-", "").isalnum()
+    assert create[6] == "shell"
+    assert Path(create[7]).is_absolute()
+    assert injection[:5] == ["fake-sbx", "exec", sandbox_name, "sh", "-lc"]
+    assert injection[-1].startswith("mkdir -p ")
+    assert volume[:6] == ["fake-sbx", "exec", sandbox_name, "docker", "volume", "create"]
+    assert volume[-1].startswith("vuebench-tools-")
+    assert install[:4] == ["fake-sbx", "exec", sandbox_name, "docker"]
+    assert "npm install --prefix /vuebench-tools --ignore-scripts corepack@0.33.0" in install[-1]
+    assert typecheck[:5] == ["fake-sbx", "exec", sandbox_name, "sh", "-lc"]
+    assert "docker run --rm --network none" in typecheck[-1]
+    assert ":ro" in typecheck[-1]
+    assert "node:24-bookworm" in typecheck[-1]
+    assert "vue-tsc" in typecheck[-1]
+    assert "VUEBENCH_STATUS:" in typecheck[-1]
+    assert tests[:5] == ["fake-sbx", "exec", sandbox_name, "sh", "-lc"]
+    assert "vitest run" in tests[-1]
+    assert "VUEBENCH_STATUS:" in tests[-1]
+    assert cleanup == ["fake-sbx", "rm", "--force", sandbox_name]
     assert not (workspace / ".vuebench-hidden").exists()
+
+
+def test_hidden_verifier_uses_unique_sandbox_names_and_runtime_node(tmp_path: Path) -> None:
+    task = load_task(TASKS_ROOT / "reactivity" / "reactive-destructure" / "task.yaml")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    verifier = SuccessfulHiddenVerifier()
+    verifier.run(task_verifier=task.verifier_path, workspace=workspace, node=24)
+    verifier.run(task_verifier=task.verifier_path, workspace=workspace, node=25)
+
+    names = [command[5] for command in verifier.commands if command[1] == "create"]
+    assert len(names) == 2
+    assert len(set(names)) == 2
+    assert all(name.startswith("vuebench-verify-") for name in names)
+    assert any("node:24-bookworm" in command[-1] for command in verifier.commands)
+    assert any("node:25-bookworm" in command[-1] for command in verifier.commands)
+
+
+def test_hidden_verifier_fails_closed_and_cleans_up_when_sandbox_creation_fails(
+    tmp_path: Path,
+) -> None:
+    task = load_task(TASKS_ROOT / "reactivity" / "reactive-destructure" / "task.yaml")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class CreateFailureVerifier(SuccessfulHiddenVerifier):
+        def _run(
+            self, command: list[str], *, cwd: Path, input_text: str | None = None
+        ) -> subprocess.CompletedProcess[str]:
+            self.commands.append(command)
+            if command[1] == "create":
+                return subprocess.CompletedProcess(command, 1, "", "sbx unavailable")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+    verifier = CreateFailureVerifier()
+    result = verifier.run(task_verifier=task.verifier_path, workspace=workspace)
+    assert result.passed is False
+    assert result.infrastructure_error is not None
+    assert "creation" in result.infrastructure_error
+    assert [command[1] for command in verifier.commands] == ["create", "rm"]
+
+
+def test_hidden_verifier_fails_closed_and_cleans_up_on_sandbox_timeout(tmp_path: Path) -> None:
+    task = load_task(TASKS_ROOT / "reactivity" / "reactive-destructure" / "task.yaml")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class TimeoutVerifier(SuccessfulHiddenVerifier):
+        def _run(
+            self, command: list[str], *, cwd: Path, input_text: str | None = None
+        ) -> subprocess.CompletedProcess[str]:
+            self.commands.append(command)
+            if command[1] == "exec":
+                raise subprocess.TimeoutExpired(command, 1)
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+    verifier = TimeoutVerifier()
+    result = verifier.run(task_verifier=task.verifier_path, workspace=workspace)
+    assert result.passed is False
+    assert result.infrastructure_error is not None
+    assert "timed out" in result.infrastructure_error
+    assert [command[1] for command in verifier.commands] == ["create", "exec", "rm"]
+
+
+def test_hidden_verifier_keeps_test_failures_distinct_from_sbx_failures(tmp_path: Path) -> None:
+    task = load_task(TASKS_ROOT / "reactivity" / "reactive-destructure" / "task.yaml")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class TestFailureVerifier(SuccessfulHiddenVerifier):
+        def _run(
+            self, command: list[str], *, cwd: Path, input_text: str | None = None
+        ) -> subprocess.CompletedProcess[str]:
+            self.commands.append(command)
+            if "vitest run" in command[-1]:
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    self._status_output(command, 1).replace("ok", "assertion failed"),
+                    "",
+                )
+            return subprocess.CompletedProcess(command, 0, self._status_output(command, 0), "")
+
+    result = TestFailureVerifier().run(task_verifier=task.verifier_path, workspace=workspace)
+    assert result.passed is False
+    assert result.tests_passed is False
+    assert result.typecheck_passed is True
+    assert result.infrastructure_error is None
+
+
+def test_hidden_verifier_rejects_nonzero_outer_sbx_exec(tmp_path: Path) -> None:
+    task = load_task(TASKS_ROOT / "reactivity" / "reactive-destructure" / "task.yaml")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class OuterFailureVerifier(SuccessfulHiddenVerifier):
+        def _run(
+            self, command: list[str], *, cwd: Path, input_text: str | None = None
+        ) -> subprocess.CompletedProcess[str]:
+            self.commands.append(command)
+            if "vitest run" in command[-1]:
+                return subprocess.CompletedProcess(command, 1, "docker daemon failed", "")
+            return subprocess.CompletedProcess(command, 0, self._status_output(command, 0), "")
+
+    result = OuterFailureVerifier().run(task_verifier=task.verifier_path, workspace=workspace)
+    assert result.passed is False
+    assert result.infrastructure_error is not None
+    assert "hidden tests execution" in result.infrastructure_error
+
+
+@pytest.mark.parametrize("marker", ["", "VUEBENCH_STATUS:wrong-token:0\n", "garbage\n"])
+def test_hidden_verifier_rejects_missing_or_invalid_status_marker(
+    tmp_path: Path, marker: str
+) -> None:
+    task = load_task(TASKS_ROOT / "reactivity" / "reactive-destructure" / "task.yaml")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class InvalidMarkerVerifier(SuccessfulHiddenVerifier):
+        def _run(
+            self, command: list[str], *, cwd: Path, input_text: str | None = None
+        ) -> subprocess.CompletedProcess[str]:
+            self.commands.append(command)
+            if "vitest run" in command[-1] and marker:
+                return subprocess.CompletedProcess(command, 0, f"ok\n{marker.strip()}", "")
+            return subprocess.CompletedProcess(command, 0, "ok", "")
+
+    result = InvalidMarkerVerifier().run(task_verifier=task.verifier_path, workspace=workspace)
+    assert result.passed is False
+    assert result.infrastructure_error is not None
+    assert "status marker" in result.infrastructure_error
+
+
+def test_hidden_verifier_rejects_unsupported_package_manager(tmp_path: Path) -> None:
+    task = load_task(TASKS_ROOT / "reactivity" / "reactive-destructure" / "task.yaml")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    result = SuccessfulHiddenVerifier().run(
+        task_verifier=task.verifier_path,
+        workspace=workspace,
+        package_manager="npm",
+    )
+    assert result.passed is False
+    assert result.infrastructure_error is not None
+    assert "unsupported package manager" in result.infrastructure_error
+
+
+def test_hidden_verifier_keeps_inner_typecheck_failure_scoreable(tmp_path: Path) -> None:
+    task = load_task(TASKS_ROOT / "reactivity" / "reactive-destructure" / "task.yaml")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class TypecheckFailureVerifier(SuccessfulHiddenVerifier):
+        def _run(
+            self, command: list[str], *, cwd: Path, input_text: str | None = None
+        ) -> subprocess.CompletedProcess[str]:
+            self.commands.append(command)
+            if "vue-tsc" in command[-1]:
+                return subprocess.CompletedProcess(command, 0, self._status_output(command, 2), "")
+            return subprocess.CompletedProcess(command, 0, self._status_output(command, 0), "")
+
+    result = TypecheckFailureVerifier().run(task_verifier=task.verifier_path, workspace=workspace)
+    assert result.passed is False
+    assert result.tests_passed is True
+    assert result.typecheck_passed is False
+    assert result.infrastructure_error is None
+
+
+@pytest.mark.parametrize("docker_status", [125, 126, 127, 128])
+def test_hidden_verifier_treats_container_statuses_as_infrastructure(
+    tmp_path: Path, docker_status: int
+) -> None:
+    task = load_task(TASKS_ROOT / "reactivity" / "reactive-destructure/task.yaml")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class ContainerFailureVerifier(SuccessfulHiddenVerifier):
+        def _run(
+            self, command: list[str], *, cwd: Path, input_text: str | None = None
+        ) -> subprocess.CompletedProcess[str]:
+            self.commands.append(command)
+            if "vue-tsc" in command[-1]:
+                return subprocess.CompletedProcess(
+                    command, 0, self._status_output(command, docker_status), ""
+                )
+            return subprocess.CompletedProcess(command, 0, self._status_output(command, 0), "")
+
+    result = ContainerFailureVerifier().run(task_verifier=task.verifier_path, workspace=workspace)
+    assert result.passed is False
+    assert result.infrastructure_error is not None
+
+
+def test_hidden_verifier_reports_cleanup_failure(tmp_path: Path) -> None:
+    task = load_task(TASKS_ROOT / "reactivity" / "reactive-destructure" / "task.yaml")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class CleanupFailureVerifier(SuccessfulHiddenVerifier):
+        def _run(
+            self, command: list[str], *, cwd: Path, input_text: str | None = None
+        ) -> subprocess.CompletedProcess[str]:
+            self.commands.append(command)
+            if command[1] == "rm":
+                return subprocess.CompletedProcess(command, 1, "", "permission denied")
+            return subprocess.CompletedProcess(command, 0, "ok", "")
+
+    result = CleanupFailureVerifier().run(task_verifier=task.verifier_path, workspace=workspace)
+    assert result.passed is False
+    assert result.infrastructure_error is not None
+    assert "cleanup failed" in result.infrastructure_error
 
 
 def test_hidden_verifier_ignores_tampered_harness_and_hidden_paths(tmp_path: Path) -> None:
@@ -117,11 +355,16 @@ def test_hidden_verifier_ignores_tampered_harness_and_hidden_paths(tmp_path: Pat
     (workspace / "tsconfig.json").write_text('{"compilerOptions":{"strict":false}}')
     (workspace / ".vuebench-hidden").mkdir()
     (workspace / ".vuebench-hidden" / "fake.spec.ts").write_text("throw new Error('bypass')")
+    (workspace / ".vuebench-corepack").mkdir()
+    (workspace / ".vuebench-corepack" / "evil.cjs").write_text("process.exit(1)")
+    (workspace / ".corepack.env").write_text("COREPACK_ENABLE_PROJECT_SPEC=1")
     (workspace / "node_modules/.bin/vitest").write_text("exit 0")
     (workspace / "src/CounterSummary.vue").write_text("candidate source")
 
     class InspectingVerifier(SuccessfulHiddenVerifier):
-        def _run(self, command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+        def _run(
+            self, command: list[str], *, cwd: Path, input_text: str | None = None
+        ) -> subprocess.CompletedProcess[str]:
             self.commands.append(command)
             assert cwd != workspace
             assert (cwd / "package.json").read_text() == (
@@ -134,18 +377,54 @@ def test_hidden_verifier_ignores_tampered_harness_and_hidden_paths(tmp_path: Pat
                 task.starter_path / "tsconfig.json"
             ).read_text()
             assert not (cwd / "node_modules").exists()
+            assert not (cwd / ".vuebench-corepack").exists()
+            assert not (cwd / ".corepack.env").exists()
             assert (cwd / "src/CounterSummary.vue").read_text() == "candidate source"
-            if command[2:4] == ["vitest", "run"]:
-                hidden_name = command[-1]
+            if "vitest run" in command[-1]:
+                hidden_name = re.search(
+                    r"(--passWithNoTests=false \.vuebench-hidden-[a-z0-9]+)", command[-1]
+                ).group(1).split()[-1]
                 assert hidden_name.startswith(".vuebench-hidden-")
-                assert (cwd / hidden_name / "reactivity.spec.ts").is_file()
-            return subprocess.CompletedProcess(command, 0, "ok", "")
+                assert not (cwd / hidden_name).exists()
+                assert f"/workspace/{hidden_name}:ro" in command[-1]
+            return subprocess.CompletedProcess(command, 0, self._status_output(command, 0), "")
 
     verifier = InspectingVerifier()
     result = verifier.run(task_verifier=task.verifier_path, workspace=workspace)
     assert result.passed is True
-    assert len(verifier.commands) == 3
+    assert len(verifier.commands) == 7
     assert (workspace / ".vuebench-hidden").exists()
+
+
+def test_candidate_symlinks_are_preserved_without_dereferencing(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("host secret")
+    (workspace / "link.txt").symlink_to(outside)
+    destination = tmp_path / "staging"
+    destination.mkdir()
+
+    HiddenVerifier._copy_candidate(workspace, destination)
+
+    copied = destination / "link.txt"
+    assert copied.is_symlink()
+    assert copied.readlink() == outside
+
+
+def test_hidden_verifier_rejects_candidate_special_files(tmp_path: Path) -> None:
+    task = load_task(TASKS_ROOT / "reactivity" / "reactive-destructure" / "task.yaml")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    os.mkfifo(workspace / "candidate-pipe")
+
+    verifier = SuccessfulHiddenVerifier()
+    result = verifier.run(task_verifier=task.verifier_path, workspace=workspace)
+
+    assert result.passed is False
+    assert result.infrastructure_error is not None
+    assert "unsupported filesystem entry" in result.infrastructure_error
+    assert [command[1] for command in verifier.commands] == ["rm"]
 
 
 @pytest.mark.parametrize(
@@ -355,6 +634,59 @@ def test_benchmark_uses_fake_agent_without_invoking_codex() -> None:
     report_case = benchmark.last_report.cases[0]
     assert report_case.assertions["passed"].value is True
     assert report_case.metadata == {"category": "reactivity", "difficulty": "easy"}
+
+
+def test_benchmark_forwards_task_runtime_to_hidden_verifier() -> None:
+    task = load_task(TASKS_ROOT / "reactivity" / "reactive-destructure" / "task.yaml")
+    calls: dict[str, object] = {}
+
+    class RuntimeVerifier(HiddenVerifier):
+        def run(self, **kwargs: object) -> object:
+            calls.update(kwargs)
+            from vuebench.models import VerificationResult
+
+            return VerificationResult(
+                tests_passed=True,
+                typecheck_passed=True,
+                tests_output="",
+                typecheck_output="",
+                passed=True,
+            )
+
+    benchmark = Benchmark(
+        agent=FakeAgent(),
+        workspace_manager=NoInstallWorkspaceManager(),
+        verifier=RuntimeVerifier(),
+    )
+    asyncio.run(benchmark.run([task]))
+    assert calls["node"] == task.runtime.node
+    assert calls["package_manager"] == task.runtime.package_manager
+
+
+def test_benchmark_surfaces_verification_infrastructure_failure_as_execution_error() -> None:
+    task = load_task(TASKS_ROOT / "reactivity" / "reactive-destructure" / "task.yaml")
+
+    class InfrastructureVerifier(HiddenVerifier):
+        def run(self, **kwargs: object) -> VerificationResult:
+            return VerificationResult(
+                tests_passed=False,
+                typecheck_passed=False,
+                tests_output="sbx unavailable",
+                typecheck_output="sbx unavailable",
+                passed=False,
+                infrastructure_error="sbx unavailable",
+            )
+
+    benchmark = Benchmark(
+        agent=FakeAgent(),
+        workspace_manager=NoInstallWorkspaceManager(),
+        verifier=InfrastructureVerifier(),
+    )
+    with pytest.raises(BenchmarkExecutionError, match="sbx unavailable"):
+        asyncio.run(benchmark.run([task]))
+    assert benchmark.last_report is not None
+    assert benchmark.last_report.cases == []
+    assert [failure.name for failure in benchmark.last_report.failures] == [task.id]
 
 
 def test_benchmark_surfaces_case_execution_failures() -> None:

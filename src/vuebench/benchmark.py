@@ -20,6 +20,10 @@ class BenchmarkExecutionError(RuntimeError):
         super().__init__(f"{len(failures)} benchmark case(s) failed to execute: {details}")
 
 
+class VerificationInfrastructureError(RuntimeError):
+    """Raised when a case could not be graded by its verification backend."""
+
+
 @dataclass
 class BenchmarkCaseInput:
     task: BenchmarkTask
@@ -70,7 +74,13 @@ class Benchmark:
                 task_verifier=task.verifier_path,
                 workspace=task_workspace.path,
                 starter=task.starter_path,
+                node=task.runtime.node,
+                package_manager=task.runtime.package_manager,
             )
+            if verification.infrastructure_error:
+                raise VerificationInfrastructureError(
+                    f"{task.id}: {verification.infrastructure_error}"
+                )
         return BenchmarkResult(
             task_id=task.id,
             task_title=task.title,

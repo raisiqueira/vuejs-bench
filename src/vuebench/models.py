@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class RuntimeConfig(BaseModel):
-    node: int = 24
+    node: int = Field(default=24, ge=24)
     package_manager: str = "pnpm"
 
 
@@ -48,6 +48,7 @@ class VerificationResult(BaseModel):
     tests_output: str
     typecheck_output: str
     passed: bool
+    infrastructure_error: str | None = None
 
 
 class BenchmarkResult(BaseModel):
