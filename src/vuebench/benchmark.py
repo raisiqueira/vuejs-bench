@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -8,7 +9,7 @@ from pydantic_evals.evaluators import EvaluationReason, Evaluator, EvaluatorCont
 from vuebench.agents.base import AgentRunner
 from vuebench.models import BenchmarkResult, BenchmarkTask
 from vuebench.tasks.workspace import WorkspaceManager
-from vuebench.verification.runner import HiddenVerifier
+from vuebench.verification.runner import HiddenVerifier, VerifierUnavailable
 
 
 class BenchmarkExecutionError(RuntimeError):
@@ -22,6 +23,10 @@ class BenchmarkExecutionError(RuntimeError):
 
 class VerificationInfrastructureError(RuntimeError):
     """Raised when a case could not be graded by its verification backend."""
+
+
+class AgentExecutionError(RuntimeError):
+    """Raised when an agent process exits before producing a gradable candidate."""
 
 
 @dataclass
@@ -55,21 +60,49 @@ class Benchmark:
         workspace_manager: WorkspaceManager | None = None,
         verifier: HiddenVerifier | None = None,
         source_repo_root: Path | None = None,
+        agent_name: str | None = None,
+        progress: Callable[[str], None] | None = None,
     ) -> None:
         self.agent = agent
         self.workspace_manager = workspace_manager or WorkspaceManager()
         self.verifier = verifier or HiddenVerifier()
         self.source_repo_root = source_repo_root.resolve() if source_repo_root else None
+        self.agent_name = agent_name or str(getattr(agent, "name", agent.__class__.__name__))
+        self.progress = progress or (lambda _: None)
         self.last_report: Any = None
 
     async def run_task(self, task: BenchmarkTask, *, model: str | None = None) -> BenchmarkResult:
+        self.progress(f"[{task.id}] checking verifier sandbox")
+        try:
+            self.verifier.preflight(cwd=task.path)
+        except VerifierUnavailable as error:
+            raise VerificationInfrastructureError(f"{task.id}: {error}") from error
+        self.progress(f"[{task.id}] preparing workspace")
         with self.workspace_manager.create(task) as task_workspace:
+            self.progress(f"[{task.id}] running {self.agent_name}")
             agent_result = await self.agent.run(
                 cwd=task_workspace.path,
                 source_repo_root=self.source_repo_root or _find_repository_root(task.path),
                 prompt=task.instruction,
                 model=model,
             )
+            if agent_result.exit_code != 0:
+                output_parts = []
+                if stderr := agent_result.stderr.strip():
+                    output_parts.append(f"stderr: {stderr}")
+                if stdout := agent_result.stdout.strip():
+                    output_parts.append(f"stdout: {stdout}")
+                details = "; ".join(output_parts) or "no output"
+                if len(details) > 2_000:
+                    details = f"{details[:2_000]}..."
+                raise AgentExecutionError(
+                    f"{task.id}: {self.agent_name} exited with status "
+                    f"{agent_result.exit_code}: {details}"
+                )
+            # Agent runs can last many minutes. Re-check SBX in case its VM or
+            # daemon stopped after the pre-paid-work preflight.
+            self.verifier.invalidate()
+            self.progress(f"[{task.id}] verifying in SBX")
             verification = self.verifier.run(
                 task_verifier=task.verifier_path,
                 workspace=task_workspace.path,
@@ -81,11 +114,14 @@ class Benchmark:
                 raise VerificationInfrastructureError(
                     f"{task.id}: {verification.infrastructure_error}"
                 )
+        self.progress(f"[{task.id}] complete")
         return BenchmarkResult(
             task_id=task.id,
             task_title=task.title,
             category=task.category,
             difficulty=task.difficulty,
+            agent_name=self.agent_name,
+            model=model,
             agent=agent_result,
             verification=verification,
         )

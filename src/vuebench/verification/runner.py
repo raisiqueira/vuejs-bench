@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import shlex
@@ -6,7 +7,8 @@ import stat
 import subprocess
 import tempfile
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from typing import Any
 
 from vuebench.models import VerificationResult
 
@@ -16,6 +18,10 @@ COREPACK_VERSION = "corepack@0.33.0"
 PINNED_PNPM = "pnpm@11.1.1"
 DEFAULT_NODE_VERSION = 24
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 300.0
+DEFAULT_SANDBOX_NAME = "vuebench-verifier"
+DEFAULT_SANDBOX_CPUS = 2
+DEFAULT_SANDBOX_MEMORY = "4g"
+RUNS_ROOT = PurePosixPath("/tmp/vuebench-runs")
 STATUS_PREFIX = "VUEBENCH_STATUS:"
 
 
@@ -37,8 +43,17 @@ def parse_verification_result(
     )
 
 
+class VerifierUnavailable(RuntimeError):
+    """Raised when the persistent SBX verifier cannot be prepared or reached."""
+
+
 class HiddenVerifier:
-    """Run hidden checks in a clone-backed, disposable Docker Sandbox VM."""
+    """Grade candidates in a persistent mountless SBX microVM.
+
+    A unique VM-private directory and Docker volume are used for every case.
+    The microVM stays warm across cases; candidate code still executes only in
+    disposable Docker containers without the Docker socket or test-time network.
+    """
 
     _protected_names = frozenset(
         {
@@ -70,12 +85,167 @@ class HiddenVerifier:
         self,
         *,
         sbx_executable: str = "sbx",
+        sandbox_name: str = DEFAULT_SANDBOX_NAME,
         command_timeout_seconds: float = DEFAULT_COMMAND_TIMEOUT_SECONDS,
+        sandbox_cpus: int = DEFAULT_SANDBOX_CPUS,
+        sandbox_memory: str = DEFAULT_SANDBOX_MEMORY,
     ) -> None:
         if command_timeout_seconds <= 0:
             raise ValueError("command_timeout_seconds must be positive")
+        if sandbox_cpus <= 0:
+            raise ValueError("sandbox_cpus must be positive")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]+", sandbox_name):
+            raise ValueError("sandbox_name is not a valid Docker Sandbox name")
         self.sbx_executable = sbx_executable
+        self.sandbox_name = sandbox_name
         self.command_timeout_seconds = command_timeout_seconds
+        self.sandbox_cpus = sandbox_cpus
+        self.sandbox_memory = sandbox_memory
+        self._ready = False
+
+    def invalidate(self) -> None:
+        """Require the next verification phase to re-check the SBX runtime."""
+        self._ready = False
+
+    def preflight(self, *, cwd: Path | None = None) -> None:
+        """Create the mountless verifier once and prove it can execute commands."""
+        if self._ready:
+            return
+        command_cwd = (cwd or Path.cwd()).resolve()
+        listed = self._safe_run(
+            [self.sbx_executable, "ls", "--json"],
+            cwd=command_cwd,
+        )
+        if listed.returncode != 0:
+            raise VerifierUnavailable(self._failure_message("sandbox listing", listed))
+        try:
+            sandbox = self._sandbox_record(listed.stdout)
+        except (json.JSONDecodeError, TypeError, ValueError) as error:
+            raise VerifierUnavailable(f"invalid `sbx ls --json` output: {error}") from error
+
+        needs_lifecycle_action = sandbox is None or (
+            str(sandbox.get("status", "")).casefold() != "running"
+        )
+        if needs_lifecycle_action:
+            diagnosed = self._safe_run(
+                [self.sbx_executable, "diagnose", "--json"],
+                cwd=command_cwd,
+            )
+            diagnostic_error = self._diagnostic_error(diagnosed)
+            if diagnostic_error is not None:
+                raise VerifierUnavailable(diagnostic_error)
+
+        if sandbox is None:
+            created = self._create_sandbox(cwd=command_cwd)
+            if created.returncode != 0:
+                raise VerifierUnavailable(self._failure_message("sandbox creation", created))
+        elif str(sandbox.get("status", "")).casefold() != "running":
+            restarted = self._safe_run(
+                [
+                    self.sbx_executable,
+                    "run",
+                    "--detached",
+                    "--name",
+                    self.sandbox_name,
+                ],
+                cwd=command_cwd,
+            )
+            if restarted.returncode != 0:
+                restart_output = _combined_output(restarted).casefold()
+                if "container missing before start" not in restart_output:
+                    raise VerifierUnavailable(self._failure_message("sandbox restart", restarted))
+                removed = self._safe_run(
+                    [self.sbx_executable, "rm", "--force", self.sandbox_name],
+                    cwd=command_cwd,
+                )
+                if removed.returncode != 0:
+                    raise VerifierUnavailable(
+                        self._failure_message("stale sandbox removal", removed)
+                    )
+                created = self._create_sandbox(cwd=command_cwd)
+                if created.returncode != 0:
+                    raise VerifierUnavailable(self._failure_message("sandbox recreation", created))
+
+        probe = self._safe_run(
+            [self.sbx_executable, "exec", self.sandbox_name, "true"],
+            cwd=command_cwd,
+        )
+        if probe.returncode != 0:
+            raise VerifierUnavailable(self._failure_message("sandbox readiness probe", probe))
+        self._ready = True
+
+    def _create_sandbox(self, *, cwd: Path) -> subprocess.CompletedProcess[str]:
+        return self._safe_run(
+            [
+                self.sbx_executable,
+                "create",
+                "--pull",
+                "missing",
+                "--cpus",
+                str(self.sandbox_cpus),
+                "--memory",
+                self.sandbox_memory,
+                "--quiet",
+                "--name",
+                self.sandbox_name,
+                "shell",
+            ],
+            cwd=cwd,
+        )
+
+    def _diagnostic_error(self, result: subprocess.CompletedProcess[str]) -> str | None:
+        try:
+            payload = json.loads(result.stdout)
+        except (json.JSONDecodeError, TypeError):
+            if result.returncode == 0:
+                return "invalid `sbx diagnose --json` output"
+            return self._failure_message("SBX diagnostics", result)
+        checks = payload.get("checks")
+        if not isinstance(checks, list):
+            return "invalid `sbx diagnose --json` output: missing checks list"
+        failures = [
+            check for check in checks if isinstance(check, dict) and check.get("status") == "fail"
+        ]
+        if not failures and result.returncode == 0:
+            return None
+        details = "; ".join(
+            f"{check.get('name', 'unknown check')}: {check.get('message', 'failed')}"
+            for check in failures
+        )
+        if not details:
+            details = _combined_output(result)
+        return (
+            f"SBX diagnostics failed: {details}; try `sbx daemon restart`, then "
+            "`vuebench verifier init`"
+        )
+
+    def status(self, *, cwd: Path | None = None) -> dict[str, Any] | None:
+        command_cwd = (cwd or Path.cwd()).resolve()
+        listed = self._safe_run(
+            [self.sbx_executable, "ls", "--json"],
+            cwd=command_cwd,
+        )
+        if listed.returncode != 0:
+            raise VerifierUnavailable(self._failure_message("sandbox listing", listed))
+        payload = json.loads(listed.stdout)
+        for sandbox in payload.get("sandboxes", []):
+            if isinstance(sandbox, dict) and sandbox.get("name") == self.sandbox_name:
+                return sandbox
+        return None
+
+    def remove(self, *, cwd: Path | None = None) -> bool:
+        command_cwd = (cwd or Path.cwd()).resolve()
+        if self.status(cwd=command_cwd) is None:
+            self._ready = False
+            return False
+        removed = self._safe_run(
+            [self.sbx_executable, "rm", "--force", self.sandbox_name],
+            cwd=command_cwd,
+        )
+        if removed.returncode != 0:
+            raise VerifierUnavailable(self._failure_message("sandbox removal", removed))
+        self._ready = False
+        return True
 
     def run(
         self,
@@ -95,142 +265,193 @@ class HiddenVerifier:
                 f"unsupported Node.js runtime for SBX verification: {node} (requires >= 24)"
             )
 
+        try:
+            self.preflight(cwd=workspace)
+        except VerifierUnavailable as error:
+            return self._infrastructure_failure(str(error))
+
         pristine_starter = starter or task_verifier.parent / "starter"
-        sandbox_name = self._sandbox_name()
-        tool_volume = self._volume_name()
+        run_id = uuid.uuid4().hex
+        run_root = RUNS_ROOT / run_id
+        vm_workspace = run_root / "workspace"
         hidden_name = f".vuebench-hidden-{uuid.uuid4().hex}"
+        hidden_vm_path = run_root / hidden_name
+        tool_volume = f"vuebench-tools-{run_id}"
+        dependency_volume = f"vuebench-deps-{run_id}"
         result: VerificationResult | None = None
+        root_prepared = False
+        created_volumes: list[str] = []
+
         with tempfile.TemporaryDirectory(prefix="vuebench-verify-") as temporary_directory:
             staging = Path(temporary_directory).resolve()
-            hidden_vm_path = staging / hidden_name
             try:
                 self._copy_candidate(workspace, staging)
                 self._restore_harness(pristine_starter, staging)
-                self._initialize_git(staging)
 
-                create = self._safe_run(
+                prepared = self._safe_run(
                     [
                         self.sbx_executable,
-                        "create",
-                        "--clone",
-                        "--quiet",
-                        "--name",
-                        sandbox_name,
-                        "shell",
-                        str(staging),
+                        "exec",
+                        self.sandbox_name,
+                        "mkdir",
+                        "-p",
+                        str(run_root),
                     ],
                     cwd=staging,
                 )
-                if create.returncode != 0:
-                    result = self._command_failure("sandbox creation", create)
+                if prepared.returncode != 0:
+                    result = self._command_failure("run directory setup", prepared)
                 else:
-                    result = self._inject_verifier(
-                        task_verifier=task_verifier,
-                        sandbox_name=sandbox_name,
-                        hidden_vm_path=hidden_vm_path,
+                    root_prepared = True
+                    copied = self._safe_run(
+                        [
+                            self.sbx_executable,
+                            "cp",
+                            str(staging),
+                            f"{self.sandbox_name}:{vm_workspace}",
+                        ],
                         cwd=staging,
                     )
-                    if result is None:
-                        volume = self._safe_run(
+                    if copied.returncode != 0:
+                        result = self._command_failure("candidate transfer", copied)
+                    else:
+                        result = self._inject_verifier(
+                            task_verifier=task_verifier,
+                            hidden_vm_path=hidden_vm_path,
+                            cwd=staging,
+                        )
+
+                if result is None:
+                    volume = self._safe_run(
+                        [
+                            self.sbx_executable,
+                            "exec",
+                            self.sandbox_name,
+                            "docker",
+                            "volume",
+                            "create",
+                            tool_volume,
+                        ],
+                        cwd=staging,
+                    )
+                    if volume.returncode != 0:
+                        result = self._command_failure("tool volume setup", volume)
+                    else:
+                        created_volumes.append(tool_volume)
+                        dependencies = self._safe_run(
                             [
                                 self.sbx_executable,
                                 "exec",
-                                sandbox_name,
+                                self.sandbox_name,
                                 "docker",
                                 "volume",
                                 "create",
-                                tool_volume,
+                                dependency_volume,
                             ],
                             cwd=staging,
                         )
-                        if volume.returncode != 0:
-                            result = self._command_failure("tool volume setup", volume)
+                        if dependencies.returncode != 0:
+                            result = self._command_failure("dependency volume setup", dependencies)
                         else:
-                            install = self._safe_run(
-                                self._setup_command(
-                                    sandbox_name=sandbox_name,
-                                    staging=staging,
-                                    node=node,
-                                    tool_volume=tool_volume,
-                                ),
-                                cwd=staging,
+                            created_volumes.append(dependency_volume)
+
+                if result is None:
+                    install = self._safe_run(
+                        self._setup_command(
+                            vm_workspace=vm_workspace,
+                            node=node,
+                            tool_volume=tool_volume,
+                            dependency_volume=dependency_volume,
+                        ),
+                        cwd=staging,
+                    )
+                    if install.returncode != 0:
+                        result = self._command_failure("dependency installation", install)
+
+                if result is None:
+                    typecheck, typecheck_token = self._run_check(
+                        cwd=staging,
+                        vm_workspace=vm_workspace,
+                        hidden_vm_path=hidden_vm_path,
+                        hidden_name=hidden_name,
+                        tool_volume=tool_volume,
+                        dependency_volume=dependency_volume,
+                        node=node,
+                        command=(
+                            f"{self._corepack_command()} {PINNED_PNPM} exec "
+                            "vue-tsc --noEmit --project tsconfig.json"
+                        ),
+                    )
+                    typecheck_status = self._parse_outer_status(typecheck, typecheck_token)
+                    if typecheck_status is None:
+                        result = self._status_failure("typecheck", typecheck)
+                    else:
+                        tests, tests_token = self._run_check(
+                            cwd=staging,
+                            vm_workspace=vm_workspace,
+                            hidden_vm_path=hidden_vm_path,
+                            hidden_name=hidden_name,
+                            tool_volume=tool_volume,
+                            dependency_volume=dependency_volume,
+                            node=node,
+                            command=(
+                                f"{self._corepack_command()} {PINNED_PNPM} exec "
+                                "vitest run --config vite.config.ts "
+                                f"--passWithNoTests=false {hidden_name}"
+                            ),
+                        )
+                        tests_status = self._parse_outer_status(tests, tests_token)
+                        if tests_status is None:
+                            result = self._status_failure("hidden tests", tests)
+                        else:
+                            result = parse_verification_result(
+                                tests_returncode=tests_status,
+                                typecheck_returncode=typecheck_status,
+                                tests_output=_combined_output(tests),
+                                typecheck_output=_combined_output(typecheck),
                             )
-                            if install.returncode != 0:
-                                result = self._command_failure(
-                                    "dependency installation", install
-                                )
-                            else:
-                                # Typecheck runs first so tests cannot mutate the
-                                # source used by the later correctness check.
-                                typecheck, typecheck_token = self._run_check(
-                                    sandbox_name=sandbox_name,
-                                    staging=staging,
-                                    hidden_vm_path=hidden_vm_path,
-                                    hidden_name=hidden_name,
-                                    tool_volume=tool_volume,
-                                    node=node,
-                                    command=(
-                                        f"{self._corepack_command()} {PINNED_PNPM} exec "
-                                        "vue-tsc --noEmit --project tsconfig.json"
-                                    ),
-                                )
-                                typecheck_status = self._parse_outer_status(
-                                    typecheck, typecheck_token
-                                )
-                                if typecheck_status is None:
-                                    result = self._status_failure("typecheck", typecheck)
-                                else:
-                                    tests, tests_token = self._run_check(
-                                        sandbox_name=sandbox_name,
-                                        staging=staging,
-                                        hidden_vm_path=hidden_vm_path,
-                                        hidden_name=hidden_name,
-                                        tool_volume=tool_volume,
-                                        node=node,
-                                        command=(
-                                            f"{self._corepack_command()} {PINNED_PNPM} exec "
-                                            "vitest run --config vite.config.ts "
-                                            f"--passWithNoTests=false {hidden_name}"
-                                        ),
-                                    )
-                                    tests_status = self._parse_outer_status(tests, tests_token)
-                                    if tests_status is None:
-                                        result = self._status_failure("hidden tests", tests)
-                                    else:
-                                        result = parse_verification_result(
-                                            tests_returncode=tests_status,
-                                            typecheck_returncode=typecheck_status,
-                                            tests_output=_combined_output(tests),
-                                            typecheck_output=_combined_output(typecheck),
-                                        )
             except (OSError, ValueError, subprocess.SubprocessError) as error:
                 result = self._infrastructure_failure(
                     f"verification setup failed: {type(error).__name__}: {error}"
                 )
             finally:
-                cleanup = self._safe_run(
-                    [self.sbx_executable, "rm", "--force", sandbox_name],
+                cleanup_errors = self._cleanup_run(
                     cwd=staging,
+                    run_root=run_root if root_prepared else None,
+                    volumes=created_volumes,
                 )
-                if cleanup.returncode != 0:
-                    cleanup_error = self._command_failure("sandbox cleanup", cleanup)
+                if cleanup_errors:
+                    cleanup_message = "; ".join(cleanup_errors)
                     if result is None:
-                        result = cleanup_error
+                        result = self._infrastructure_failure(cleanup_message)
                     else:
+                        prior = result.infrastructure_error or (
+                            "checks passed" if result.passed else "checks failed"
+                        )
                         result.infrastructure_error = (
-                            f"{cleanup_error.infrastructure_error}; "
-                            f"prior verification result: {result.infrastructure_error or 'none'}"
+                            f"prior verification result: {prior}; cleanup also failed: "
+                            f"{cleanup_message}"
                         )
                         result.passed = False
+                self.invalidate()
 
         return result or self._infrastructure_failure("verification produced no result")
+
+    def _sandbox_record(self, output: str) -> dict[str, Any] | None:
+        payload = json.loads(output)
+        sandboxes = payload.get("sandboxes")
+        if not isinstance(sandboxes, list):
+            raise ValueError("missing sandboxes list")
+        for sandbox in sandboxes:
+            if isinstance(sandbox, dict) and sandbox.get("name") == self.sandbox_name:
+                return sandbox
+        return None
 
     def _inject_verifier(
         self,
         *,
         task_verifier: Path,
-        sandbox_name: str,
-        hidden_vm_path: Path,
+        hidden_vm_path: PurePosixPath,
         cwd: Path,
     ) -> VerificationResult | None:
         files = sorted(path for path in task_verifier.rglob("*") if path.is_file())
@@ -240,13 +461,12 @@ class HiddenVerifier:
                     f"hidden verifier contains unsupported symlink: {source}"
                 )
             relative = source.relative_to(task_verifier)
-            target = hidden_vm_path / relative
+            target = hidden_vm_path / PurePosixPath(relative.as_posix())
             command = (
-                f"mkdir -p {shlex.quote(str(target.parent))} && "
-                f"cat > {shlex.quote(str(target))}"
+                f"mkdir -p {shlex.quote(str(target.parent))} && cat > {shlex.quote(str(target))}"
             )
             injected = self._safe_run(
-                [self.sbx_executable, "exec", sandbox_name, "sh", "-lc", command],
+                [self.sbx_executable, "exec", self.sandbox_name, "sh", "-lc", command],
                 cwd=cwd,
                 input_text=source.read_text(encoding="utf-8"),
             )
@@ -257,19 +477,21 @@ class HiddenVerifier:
     def _run_check(
         self,
         *,
-        sandbox_name: str,
-        staging: Path,
-        hidden_vm_path: Path,
+        cwd: Path,
+        vm_workspace: PurePosixPath,
+        hidden_vm_path: PurePosixPath,
         hidden_name: str,
         tool_volume: str,
+        dependency_volume: str,
         node: int,
         command: str,
     ) -> tuple[subprocess.CompletedProcess[str], str]:
         docker_command = self._docker_check_command(
-            staging=staging,
+            vm_workspace=vm_workspace,
             hidden_vm_path=hidden_vm_path,
             hidden_name=hidden_name,
             tool_volume=tool_volume,
+            dependency_volume=dependency_volume,
             node=node,
             command=command,
         )
@@ -280,66 +502,75 @@ class HiddenVerifier:
             '"$__vuebench_docker_exit"; exit 0'
         )
         result = self._safe_run(
-            [self.sbx_executable, "exec", sandbox_name, "sh", "-lc", wrapper],
-            cwd=staging,
+            [self.sbx_executable, "exec", self.sandbox_name, "sh", "-lc", wrapper],
+            cwd=cwd,
         )
         return result, token
 
     def _setup_command(
-        self, *, sandbox_name: str, staging: Path, node: int, tool_volume: str
+        self,
+        *,
+        vm_workspace: PurePosixPath,
+        node: int,
+        tool_volume: str,
+        dependency_volume: str,
     ) -> list[str]:
         script = (
             f"npm install --prefix /vuebench-tools --ignore-scripts {COREPACK_VERSION} && "
             f"COREPACK_HOME={COREPACK_HOME} {self._corepack_command()} install --global "
             f"{PINNED_PNPM} && "
             f"COREPACK_HOME={COREPACK_HOME} {self._corepack_command()} {PINNED_PNPM} "
-            "install --frozen-lockfile --ignore-scripts"
+            "install --frozen-lockfile --ignore-scripts --store-dir /vuebench-tools/store && "
+            "mkdir -p /workspace/node_modules/.vite /workspace/node_modules/.vite-temp"
         )
         return self._docker_command(
-            sandbox_name=sandbox_name,
-            staging=staging,
+            vm_workspace=vm_workspace,
             node=node,
             tool_volume=tool_volume,
+            dependency_volume=dependency_volume,
             script=script,
         )
 
     def _docker_check_command(
         self,
         *,
-        staging: Path,
-        hidden_vm_path: Path,
+        vm_workspace: PurePosixPath,
+        hidden_vm_path: PurePosixPath,
         hidden_name: str,
         tool_volume: str,
+        dependency_volume: str,
         node: int,
         command: str,
     ) -> str:
         args = self._docker_command(
-            sandbox_name="",
-            staging=staging,
+            vm_workspace=vm_workspace,
             node=node,
             tool_volume=tool_volume,
+            dependency_volume=dependency_volume,
             script=command,
             network_disabled=True,
             hidden_vm_path=hidden_vm_path,
             hidden_name=hidden_name,
             tool_read_only=True,
+            dependency_read_only=True,
         )[4:]
         return "docker " + " ".join(shlex.quote(arg) for arg in args)
 
     def _docker_command(
         self,
         *,
-        sandbox_name: str,
-        staging: Path,
+        vm_workspace: PurePosixPath,
         node: int,
         tool_volume: str,
+        dependency_volume: str,
         script: str,
         network_disabled: bool = False,
-        hidden_vm_path: Path | None = None,
+        hidden_vm_path: PurePosixPath | None = None,
         hidden_name: str | None = None,
         tool_read_only: bool = False,
+        dependency_read_only: bool = False,
     ) -> list[str]:
-        command = [self.sbx_executable, "exec", sandbox_name, "docker", "run", "--rm"]
+        command = [self.sbx_executable, "exec", self.sandbox_name, "docker", "run", "--rm"]
         if network_disabled:
             command.extend(["--network", "none"])
         command.extend(
@@ -351,9 +582,21 @@ class HiddenVerifier:
                 "-v",
                 f"{tool_volume}:/vuebench-tools{':ro' if tool_read_only else ''}",
                 "-v",
-                f"{staging}:/workspace",
+                f"{vm_workspace}:/workspace",
+                "-v",
+                f"{dependency_volume}:/workspace/node_modules"
+                f"{':ro' if dependency_read_only else ''}",
             ]
         )
+        if dependency_read_only:
+            command.extend(
+                [
+                    "--tmpfs",
+                    "/workspace/node_modules/.vite",
+                    "--tmpfs",
+                    "/workspace/node_modules/.vite-temp",
+                ]
+            )
         if hidden_vm_path is not None and hidden_name is not None:
             command.extend(["-v", f"{hidden_vm_path}:/workspace/{hidden_name}:ro"])
         command.extend(
@@ -368,17 +611,51 @@ class HiddenVerifier:
         )
         return command
 
+    def _cleanup_run(
+        self,
+        *,
+        cwd: Path,
+        run_root: PurePosixPath | None,
+        volumes: list[str],
+    ) -> list[str]:
+        errors: list[str] = []
+        if volumes:
+            volume = self._safe_run(
+                [
+                    self.sbx_executable,
+                    "exec",
+                    self.sandbox_name,
+                    "docker",
+                    "volume",
+                    "rm",
+                    "--force",
+                    *volumes,
+                ],
+                cwd=cwd,
+            )
+            if volume.returncode != 0:
+                errors.append(self._failure_message("Docker volume cleanup", volume))
+        if run_root is not None:
+            directory = self._safe_run(
+                [
+                    self.sbx_executable,
+                    "exec",
+                    self.sandbox_name,
+                    "sudo",
+                    "rm",
+                    "-rf",
+                    "--",
+                    str(run_root),
+                ],
+                cwd=cwd,
+            )
+            if directory.returncode != 0:
+                errors.append(self._failure_message("run directory cleanup", directory))
+        return errors
+
     @staticmethod
     def _corepack_command() -> str:
         return "/vuebench-tools/node_modules/.bin/corepack"
-
-    @staticmethod
-    def _sandbox_name() -> str:
-        return f"vuebench-verify-{uuid.uuid4().hex}"
-
-    @staticmethod
-    def _volume_name() -> str:
-        return f"vuebench-tools-{uuid.uuid4().hex}"
 
     @classmethod
     def _copy_candidate(cls, workspace: Path, destination: Path) -> None:
@@ -405,8 +682,7 @@ class HiddenVerifier:
                 )
                 if special:
                     raise ValueError(
-                        "candidate contains unsupported filesystem entry: "
-                        f"{Path(root) / name}"
+                        f"candidate contains unsupported filesystem entry: {Path(root) / name}"
                     )
 
     @classmethod
@@ -418,31 +694,6 @@ class HiddenVerifier:
             destination = workspace / name
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
-
-    @staticmethod
-    def _initialize_git(staging: Path) -> None:
-        commands = [
-            ["git", "init", "--quiet"],
-            ["git", "add", "--all"],
-            [
-                "git",
-                "-c",
-                "core.hooksPath=/dev/null",
-                "-c",
-                "user.email=vuebench@example.invalid",
-                "-c",
-                "user.name=VueBench",
-                "-c",
-                "commit.gpgsign=false",
-                "commit",
-                "--quiet",
-                "--allow-empty",
-                "-m",
-                "verification-staging",
-            ],
-        ]
-        for command in commands:
-            subprocess.run(command, cwd=staging, check=True, capture_output=True, text=True)
 
     def _safe_run(
         self,
@@ -481,14 +732,10 @@ class HiddenVerifier:
         )
 
     @staticmethod
-    def _parse_outer_status(
-        result: subprocess.CompletedProcess[str], token: str
-    ) -> int | None:
+    def _parse_outer_status(result: subprocess.CompletedProcess[str], token: str) -> int | None:
         if result.returncode != 0:
             return None
         pattern = rf"{re.escape(STATUS_PREFIX)}{re.escape(token)}:(\d+)"
-        # The trusted wrapper writes its marker to stdout after Docker exits.
-        # Keep stderr as a fallback for fake executors and unusual shell setups.
         for stream in (result.stdout, result.stderr):
             lines = stream.splitlines()
             if not lines:
@@ -515,9 +762,11 @@ class HiddenVerifier:
     def _command_failure(
         cls, phase: str, result: subprocess.CompletedProcess[str]
     ) -> VerificationResult:
-        return cls._infrastructure_failure(
-            f"{phase} failed (exit {result.returncode}): {_combined_output(result)}"
-        )
+        return cls._infrastructure_failure(cls._failure_message(phase, result))
+
+    @staticmethod
+    def _failure_message(phase: str, result: subprocess.CompletedProcess[str]) -> str:
+        return f"{phase} failed (exit {result.returncode}): {_combined_output(result)}"
 
     @staticmethod
     def _infrastructure_failure(reason: str) -> VerificationResult:
@@ -539,3 +788,11 @@ def _text_output(value: str | bytes | None) -> str:
     if value is None:
         return ""
     return value.decode(errors="replace") if isinstance(value, bytes) else value
+
+
+__all__ = [
+    "DEFAULT_SANDBOX_NAME",
+    "HiddenVerifier",
+    "VerifierUnavailable",
+    "parse_verification_result",
+]

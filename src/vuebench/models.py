@@ -56,5 +56,7 @@ class BenchmarkResult(BaseModel):
     task_title: str
     category: str
     difficulty: str
+    agent_name: str = "unknown"
+    model: str | None = None
     agent: AgentResult
     verification: VerificationResult

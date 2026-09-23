@@ -7,3 +7,6 @@ __pycache__/
 
 # Fixture dependencies are installed into disposable starter workspaces.
 tasks/**/starter/node_modules/
+
+# Generated benchmark reports (ad-hoc text captures remain visible).
+results/*.json

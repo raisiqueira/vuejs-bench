@@ -7,9 +7,9 @@ Vitest and `vue-tsc` checks as the correctness authority.
 ## Current scope
 
 The MVP covers Vue 3 reactivity only: reactive destructuring, watcher sources, and choosing
-`shallowRef` for a root-reactive immutable catalog. Codex CLI is the implemented agent adapter.
-The adapter boundary leaves room for Claude Code, OpenCode, or skills-injection experiments later;
-those integrations are not part of this MVP.
+`shallowRef` for a root-reactive immutable catalog. It can run Codex, Claude Code, OpenCode, or
+Ori Code (with OpenRouter models) as host-native agents while using one deterministic
+grading pipeline for all of them.
 
 ## Architecture
 
@@ -18,25 +18,30 @@ Each case flows through these boundaries:
 1. A benchmark task is loaded from `task.yaml` and its GitHub-issue-style instruction.
 2. A fresh temporary copy of `starter/` is initialized as a Git repository and dependencies are
    installed.
-3. An `AgentRunner` (currently `CodexRunner`) receives only that workspace and instruction.
-4. After the agent exits, the hidden verifier reconstructs a trusted disposable staging Git repo
-   from candidate source plus pristine starter configuration. The hidden verifier is injected
-   afterward through `sbx exec` stdin, so it never appears in host staging.
-5. The verifier creates a uniquely named Docker Sandbox (SBX) microVM with `--clone`. Its private
-   Docker daemon runs the explicit `node:<runtime.node>-bookworm` runtime tag against the cloned
-   workspace, while the host staging tree remains isolated from VM edits.
-6. A Docker named volume owned by that private daemon holds an explicitly installed Corepack
-   0.33.0 and cached pnpm 11.1.1. Dependencies install in a networked setup container; hidden
-   `vue-tsc --noEmit` and Vitest run first and second in separate `--network none` containers,
-   mounting tooling read-only. Their results become a structured `VerificationResult`.
-7. Pydantic Evals orchestrates the cases and deterministic evaluator report; it does not judge
+3. The selected host-native `AgentRunner` receives only that workspace and instruction. Every
+   adapter is wrapped in macOS Seatbelt: reads from the benchmark checkout are denied, and writes
+   are limited to the disposable trial workspace plus runner-owned temporary state outside it.
+4. Before the paid agent phase begins, VueBench checks a persistent, mountless Docker Sandbox
+   named `vuebench-verifier` by default. It creates the sandbox once when absent and probes it.
+5. After the agent exits, the hidden verifier reconstructs trusted staging from candidate source
+   plus pristine starter configuration, copies it into a unique VM-private run directory, then
+   injects hidden tests through `sbx exec` stdin. Hidden tests never appear in agent or host staging.
+6. The persistent microVM's private Docker daemon runs disposable containers using the explicit
+   `node:<runtime.node>-bookworm` tag. Unique Docker volumes hold an explicitly installed Corepack
+   0.33.0, pnpm 11.1.1, its store, and `node_modules`. Dependencies install in a networked setup
+   container; hidden `vue-tsc --noEmit` and Vitest run first and second in separate `--network none`
+   containers with tooling and dependencies read-only. Their results become a structured
+   `VerificationResult`.
+7. VueBench removes the per-case VM directory and Docker volumes, but retains the verifier sandbox
+   for the next case. SBX may suspend and restart its VM between runs, without the unreliable
+   create/delete lifecycle on every task.
+8. Pydantic Evals orchestrates the cases and deterministic evaluator report; it does not judge
    whether Vue code is correct.
 
-The hidden verifier is absent from the starter copy and is removed after verification. On the
-current macOS MVP, Codex is additionally wrapped in `/usr/bin/sandbox-exec` (Seatbelt), with
-`file-read*` denied for the entire benchmark Git checkout. This whole-checkout boundary protects
-the verifier files and Git objects; if Seatbelt is unavailable, VueBench fails closed instead of
-running Codex unisolated. Linux and other non-macOS hosts are not supported by this MVP yet.
+The hidden verifier is absent from the starter copy and removed from the VM after verification.
+The whole-checkout Seatbelt boundary protects verifier files and Git objects; if Seatbelt is
+unavailable, VueBench fails closed instead of running an agent unisolated. Linux and other
+non-macOS hosts are not supported by this host-native runner architecture yet.
 
 ## Requirements
 
@@ -45,27 +50,40 @@ running Codex unisolated. Linux and other non-macOS hosts are not supported by t
 - Node.js 24+ (task runtimes below 24 are rejected)
 - pnpm 11+
 - Docker Sandboxes CLI 0.39+ (`sbx`), required for production verification runs
-- An authenticated [Codex CLI](https://developers.openai.com/codex/cli/)
+- At least one authenticated host CLI: Codex, Claude Code, OpenCode, or Ori
 
 ## Running
 
 ```bash
 uv sync
 uv run vuebench list
-uv run vuebench run
-uv run vuebench run --task reactive-destructure
-uv run python -m vuebench
-uv run vuebench --task reactive-destructure
+uv run vuebench verifier init
+uv run vuebench --task reactive-destructure --agent codex --model gpt-6-luna
+uv run vuebench run --task reactive-destructure --agent claude --model sonnet
+uv run vuebench run --task reactive-destructure --agent opencode --model openai/gpt-5
+uv run vuebench run --task reactive-destructure --agent ori --model z-ai/glm-5.3-flash
 ```
 
 Omitting the command defaults to `run`, including when using the Python module entry point.
-`run` creates and cleans up one temporary workspace per task, invokes Codex non-interactively,
-captures its Git diff (including changes committed by the agent), and prints a readable report.
-After Codex exits, verification is fail-closed if SBX cannot create, execute, or clean up its
-microVM; there is no host-grading fallback. Production verification requires SBX 0.39+. The
-remaining solving boundary is macOS Seatbelt around Codex; SBX supplies the clean-room grading
-boundary. Each trial has a 15-minute Codex timeout by default; use `--timeout` to override it and
-`--model` to pass an optional Codex model override.
+`run` checks SBX first, prints progress for each phase, invokes the selected agent
+non-interactively, captures its Git diff (including committed changes), and prints a report.
+There is no host-grading fallback. Each trial has a 15-minute agent timeout by default; use
+`--timeout` to override it and `--model` to pass an optional model override.
+
+Every run writes structured JSON to `results/<timestamp>-<scope>-<agent>.json`. Use `--output`
+to choose a path or `--no-save` to disable persistence. The JSON includes timestamps, agent,
+model, process output/diff, deterministic check output, and infrastructure errors.
+
+Manage the persistent verifier explicitly:
+
+```bash
+uv run vuebench verifier status
+uv run vuebench verifier init
+uv run vuebench verifier remove
+```
+
+`init` is optional because `run` performs the same preflight before starting the agent. Keeping it
+as a separate command is useful for diagnosing SBX once, before spending time or API credits.
 
 ## Adding a task
 
