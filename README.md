@@ -60,21 +60,32 @@ non-macOS hosts are not supported by this host-native runner architecture yet.
 uv sync
 uv run vuebench list
 uv run vuebench verifier init
-uv run vuebench --task reactive-destructure --agent codex --model gpt-6-luna
-uv run vuebench run --task reactive-destructure --agent claude --model sonnet
-uv run vuebench run --task reactive-destructure --agent opencode --model openai/gpt-5
-uv run vuebench run --task reactive-destructure --agent ori --model z-ai/glm-5.3-flash
+uv run vuebench --task reactive-destructure --agent codex --model gpt-6-luna --effort high
+uv run vuebench run --task reactive-destructure --agent claude --model sonnet --effort high
+uv run vuebench run --task reactive-destructure --agent opencode --model openai/gpt-5 --effort high
+uv run vuebench run --task reactive-destructure --agent ori --model z-ai/glm-5.3-flash --effort high
 ```
 
 Omitting the command defaults to `run`, including when using the Python module entry point.
 `run` checks SBX first, prints progress for each phase, invokes the selected agent
 non-interactively, captures its Git diff (including committed changes), and prints a report.
 There is no host-grading fallback. Each trial has a 15-minute agent timeout by default; use
-`--timeout` to override it and `--model` to pass an optional model override.
+`--timeout` to override it, `--model` to pass an optional model override, and `--effort` to pin
+reasoning effort. VueBench translates `--effort` to each agent's native interface:
+
+| Agent | Native setting | Supported values |
+| --- | --- | --- |
+| Codex | `model_reasoning_effort` | Model-dependent |
+| Claude Code | `--effort` | `low`, `medium`, `high`, `xhigh`, `max` |
+| OpenCode | `--variant` | Provider/model-dependent |
+| Ori Code | `--reasoning-effort` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; model/harness-dependent |
+
+VueBench forwards the requested value without substituting another level. The selected agent exits
+with an execution error when its model or provider does not support that value.
 
 Every run writes structured JSON to `results/<timestamp>-<scope>-<agent>.json`. Use `--output`
 to choose a path or `--no-save` to disable persistence. The JSON includes timestamps, agent,
-model, process output/diff, deterministic check output, and infrastructure errors.
+model, effort, process output/diff, deterministic check output, and infrastructure errors.
 
 Manage the persistent verifier explicitly:
 

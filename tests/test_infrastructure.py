@@ -656,7 +656,15 @@ def test_codex_command_is_noninteractive_and_model_is_optional(tmp_path: Path) -
         "--color",
         "never",
     ]
-    assert runner.command(cwd=tmp_path, source_repo_root=REPO_ROOT, model="gpt-test")[-2:] == [
+    configured_command = runner.command(
+        cwd=tmp_path,
+        source_repo_root=REPO_ROOT,
+        model="gpt-test",
+        effort="high",
+    )
+    assert configured_command[-4:] == [
+        "-c",
+        'model_reasoning_effort="high"',
         "--model",
         "gpt-test",
     ]
@@ -669,9 +677,10 @@ def test_native_agent_commands_are_noninteractive_and_model_aware(tmp_path: Path
         cwd=tmp_path,
         source_repo_root=REPO_ROOT,
         model="sonnet",
+        effort="high",
         prompt="fix it",
     )
-    assert claude_command[-3:] == ["text", "--model", "sonnet"]
+    assert claude_command[-5:] == ["text", "--effort", "high", "--model", "sonnet"]
     assert "--safe-mode" in claude_command
     assert "--no-session-persistence" in claude_command
 
@@ -680,9 +689,16 @@ def test_native_agent_commands_are_noninteractive_and_model_aware(tmp_path: Path
         cwd=tmp_path,
         source_repo_root=REPO_ROOT,
         model="openai/gpt-test",
+        effort="high",
         prompt="fix it",
     )
-    assert opencode_command[-3:] == ["--model", "openai/gpt-test", "fix it"]
+    assert opencode_command[-5:] == [
+        "--variant",
+        "high",
+        "--model",
+        "openai/gpt-test",
+        "fix it",
+    ]
     assert "--pure" in opencode_command
     assert "--auto" in opencode_command
 
@@ -691,6 +707,7 @@ def test_native_agent_commands_are_noninteractive_and_model_aware(tmp_path: Path
         cwd=tmp_path,
         source_repo_root=REPO_ROOT,
         model="openai/gpt-test",
+        effort="high",
         prompt="fix it",
     )
     inner = ori_command[4:]
@@ -701,6 +718,8 @@ def test_native_agent_commands_are_noninteractive_and_model_aware(tmp_path: Path
         "self-drive",
         "--output",
         "text",
+        "--reasoning-effort",
+        "high",
         "--model",
         "openai/gpt-test",
         "--prompt",
@@ -880,6 +899,7 @@ class FakeAgent:
         source_repo_root: Path,
         prompt: str,
         model: str | None = None,
+        effort: str | None = None,
     ) -> AgentResult:
         assert not (cwd / ".vuebench-hidden").exists()
         assert source_repo_root == REPO_ROOT
@@ -901,6 +921,7 @@ class FailingAgent:
         source_repo_root: Path,
         prompt: str,
         model: str | None = None,
+        effort: str | None = None,
     ) -> AgentResult:
         raise RuntimeError("codex unavailable")
 
@@ -923,9 +944,11 @@ def test_benchmark_uses_fake_agent_without_invoking_codex() -> None:
         workspace_manager=NoInstallWorkspaceManager(),
         verifier=SuccessfulHiddenVerifier(),
     )
-    results = asyncio.run(benchmark.run([task]))
+    results = asyncio.run(benchmark.run([task], model="test-model", effort="high"))
     result = results[0]
     assert result.agent.stdout == "fake"
+    assert result.model == "test-model"
+    assert result.effort == "high"
     assert result.verification.passed is True
     assert benchmark.last_report is not None
     report_case = benchmark.last_report.cases[0]
@@ -1070,7 +1093,13 @@ def test_cli_reports_case_execution_failure(monkeypatch: pytest.MonkeyPatch) -> 
         def __init__(self, **kwargs: object) -> None:
             pass
 
-        async def run(self, tasks: list[object], *, model: str | None = None) -> list[object]:
+        async def run(
+            self,
+            tasks: list[object],
+            *,
+            model: str | None = None,
+            effort: str | None = None,
+        ) -> list[object]:
             raise BenchmarkExecutionError(
                 [SimpleNamespace(name=tasks[0].id, error_message="codex unavailable")]
             )
@@ -1089,6 +1118,7 @@ def test_cli_defaults_to_run_without_a_command() -> None:
     assert args.command == "run"
     assert args.task is None
     assert args.model is None
+    assert args.effort is None
     assert args.timeout == DEFAULT_TIMEOUT_SECONDS
     assert args.tasks_root == cli.default_tasks_root()
 
@@ -1100,6 +1130,8 @@ def test_cli_accepts_run_options_without_a_command(tmp_path: Path) -> None:
             "reactive-destructure",
             "--model",
             "gpt-test",
+            "--effort",
+            "high",
             "--timeout",
             "12",
             "--tasks-root",
@@ -1110,16 +1142,21 @@ def test_cli_accepts_run_options_without_a_command(tmp_path: Path) -> None:
     assert args.command == "run"
     assert args.task == "reactive-destructure"
     assert args.model == "gpt-test"
+    assert args.effort == "high"
     assert args.timeout == 12
     assert args.tasks_root == tmp_path
 
 
 def test_cli_accepts_agent_and_verifier_management_commands() -> None:
-    run_args = cli.build_parser().parse_args(["--agent", "ori", "--model", "openai/gpt"])
+    run_args = cli.build_parser().parse_args(
+        ["run", "--agent", "ori", "--model", "openai/gpt", "--effort", "xhigh"]
+    )
     verifier_args = cli.build_parser().parse_args(["verifier", "status", "--name", "vuebench-test"])
 
+    assert run_args.command == "run"
     assert run_args.agent == "ori"
     assert run_args.model == "openai/gpt"
+    assert run_args.effort == "xhigh"
     assert verifier_args.command == "verifier"
     assert verifier_args.action == "status"
     assert verifier_args.name == "vuebench-test"
@@ -1134,6 +1171,7 @@ def test_json_result_document_is_structured_and_atomic(tmp_path: Path) -> None:
         difficulty=task.difficulty,
         agent_name="codex",
         model="gpt-test",
+        effort="high",
         agent=AgentResult(exit_code=0, stdout="", stderr="", diff="", duration_seconds=1),
         verification=VerificationResult(
             tests_passed=True,
@@ -1152,6 +1190,7 @@ def test_json_result_document_is_structured_and_atomic(tmp_path: Path) -> None:
             started=started,
             agent="codex",
             model="gpt-test",
+            effort="high",
             results=[result],
         ),
     )
@@ -1159,6 +1198,8 @@ def test_json_result_document_is_structured_and_atomic(tmp_path: Path) -> None:
     payload = json.loads(output.read_text())
     assert payload["schema_version"] == 1
     assert payload["status"] == "completed"
+    assert payload["effort"] == "high"
+    assert payload["results"][0]["effort"] == "high"
     assert payload["results"][0]["task_id"] == task.id
     assert not (output.parent / f".{output.name}.tmp").exists()
 
@@ -1171,9 +1212,16 @@ def test_cli_main_runs_with_no_command(monkeypatch: pytest.MonkeyPatch) -> None:
         def __init__(self, **kwargs: object) -> None:
             calls.update(kwargs)
 
-        async def run(self, tasks: list[object], *, model: str | None = None) -> list[object]:
+        async def run(
+            self,
+            tasks: list[object],
+            *,
+            model: str | None = None,
+            effort: str | None = None,
+        ) -> list[object]:
             calls["tasks"] = tasks
             calls["model"] = model
+            calls["effort"] = effort
             return [
                 SimpleNamespace(
                     task_id=task.id,
@@ -1193,6 +1241,7 @@ def test_cli_main_runs_with_no_command(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert calls["tasks"] == [task]
     assert calls["model"] is None
+    assert calls["effort"] is None
 
 
 def test_deterministic_evaluator_reads_only_verification() -> None:

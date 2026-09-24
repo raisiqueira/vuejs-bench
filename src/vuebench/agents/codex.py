@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from vuebench.agents.native import (
@@ -31,7 +32,9 @@ class CodexRunner(NativeAgentRunner):
         )
         self.executable = executable
 
-    def _agent_command(self, *, cwd: Path, model: str | None, prompt: str | None) -> list[str]:
+    def _agent_command(
+        self, *, cwd: Path, model: str | None, effort: str | None, prompt: str | None
+    ) -> list[str]:
         command = [
             self.executable,
             "exec",
@@ -47,6 +50,8 @@ class CodexRunner(NativeAgentRunner):
             "--color",
             "never",
         ]
+        if effort:
+            command.extend(["-c", f"model_reasoning_effort={json.dumps(effort)}"])
         if model:
             command.extend(["--model", model])
         return command

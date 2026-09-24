@@ -29,6 +29,11 @@ def _add_run_arguments(parser: argparse.ArgumentParser, *, suppress_defaults: bo
     )
     parser.add_argument("--model", default=default, help="Optional model override for the agent")
     parser.add_argument(
+        "--effort",
+        default=default,
+        help="Optional reasoning effort or model variant override for the agent",
+    )
+    parser.add_argument(
         "--timeout",
         type=float,
         default=argparse.SUPPRESS if suppress_defaults else DEFAULT_TIMEOUT_SECONDS,
@@ -106,6 +111,7 @@ def _result_payload(
     started: datetime,
     agent: str,
     model: str | None,
+    effort: str | None,
     results: list[BenchmarkResult] | None = None,
     error: str | None = None,
 ) -> dict[str, Any]:
@@ -116,6 +122,7 @@ def _result_payload(
         "finished_at": datetime.now(UTC).isoformat(),
         "agent": agent,
         "model": model,
+        "effort": effort,
         "error": error,
         "results": [result.model_dump(mode="json") for result in results or []],
     }
@@ -188,7 +195,7 @@ def main() -> None:
         progress=lambda message: print(message, flush=True),
     )
     try:
-        results = asyncio.run(benchmark.run(selected, model=args.model))
+        results = asyncio.run(benchmark.run(selected, model=args.model, effort=args.effort))
     except BenchmarkExecutionError as exc:
         message = f"Benchmark failed: {exc}"
         if output_path is not None:
@@ -198,6 +205,7 @@ def main() -> None:
                     started=started,
                     agent=args.agent,
                     model=args.model,
+                    effort=args.effort,
                     error=message,
                 ),
             )
@@ -211,6 +219,7 @@ def main() -> None:
                 started=started,
                 agent=args.agent,
                 model=args.model,
+                effort=args.effort,
                 results=results,
             ),
         )

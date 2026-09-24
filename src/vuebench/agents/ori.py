@@ -18,7 +18,9 @@ class OriRunner(NativeAgentRunner):
         super().__init__(timeout_seconds=timeout_seconds, **kwargs)
         self.executable = executable
 
-    def _agent_command(self, *, cwd: Path, model: str | None, prompt: str | None) -> list[str]:
+    def _agent_command(
+        self, *, cwd: Path, model: str | None, effort: str | None, prompt: str | None
+    ) -> list[str]:
         if prompt is None:
             raise ValueError("Ori Code requires a prompt for a headless run")
         command = [
@@ -29,6 +31,8 @@ class OriRunner(NativeAgentRunner):
             "--output",
             "text",
         ]
+        if effort:
+            command.extend(["--reasoning-effort", effort])
         if model:
             command.extend(["--model", model])
         command.extend(["--prompt", prompt])

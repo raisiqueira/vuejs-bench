@@ -14,5 +14,6 @@ class AgentRunner(Protocol):
         source_repo_root: Path,
         prompt: str,
         model: str | None = None,
+        effort: str | None = None,
     ) -> AgentResult:
         """Run an agent in ``cwd`` and return its process and diff details."""

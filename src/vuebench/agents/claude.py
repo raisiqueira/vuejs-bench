@@ -16,7 +16,9 @@ class ClaudeRunner(NativeAgentRunner):
         super().__init__(timeout_seconds=timeout_seconds, **kwargs)
         self.executable = executable
 
-    def _agent_command(self, *, cwd: Path, model: str | None, prompt: str | None) -> list[str]:
+    def _agent_command(
+        self, *, cwd: Path, model: str | None, effort: str | None, prompt: str | None
+    ) -> list[str]:
         command = [
             self.executable,
             "--print",
@@ -29,6 +31,8 @@ class ClaudeRunner(NativeAgentRunner):
             "--output-format",
             "text",
         ]
+        if effort:
+            command.extend(["--effort", effort])
         if model:
             command.extend(["--model", model])
         return command

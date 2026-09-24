@@ -58,5 +58,6 @@ class BenchmarkResult(BaseModel):
     difficulty: str
     agent_name: str = "unknown"
     model: str | None = None
+    effort: str | None = None
     agent: AgentResult
     verification: VerificationResult

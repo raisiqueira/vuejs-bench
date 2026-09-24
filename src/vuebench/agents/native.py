@@ -45,6 +45,7 @@ class NativeAgentRunner(ABC):
         cwd: Path,
         source_repo_root: Path,
         model: str | None = None,
+        effort: str | None = None,
         prompt: str | None = None,
         scratch: Path | None = None,
     ) -> list[str]:
@@ -60,11 +61,13 @@ class NativeAgentRunner(ABC):
             "-p",
             profile,
             "--",
-            *self._agent_command(cwd=cwd, model=model, prompt=prompt),
+            *self._agent_command(cwd=cwd, model=model, effort=effort, prompt=prompt),
         ]
 
     @abstractmethod
-    def _agent_command(self, *, cwd: Path, model: str | None, prompt: str | None) -> list[str]:
+    def _agent_command(
+        self, *, cwd: Path, model: str | None, effort: str | None, prompt: str | None
+    ) -> list[str]:
         """Build the CLI-specific command inside the Seatbelt boundary."""
 
     def prompt_input(self, prompt: str) -> bytes | None:
@@ -131,6 +134,7 @@ class NativeAgentRunner(ABC):
         source_repo_root: Path,
         prompt: str,
         model: str | None = None,
+        effort: str | None = None,
     ) -> AgentResult:
         started = time.monotonic()
         baseline = await self._git_revision(cwd)
@@ -140,6 +144,7 @@ class NativeAgentRunner(ABC):
                 cwd=cwd,
                 source_repo_root=source_repo_root,
                 model=model,
+                effort=effort,
                 prompt=prompt,
                 scratch=scratch,
             )

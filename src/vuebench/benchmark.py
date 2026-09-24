@@ -33,6 +33,7 @@ class AgentExecutionError(RuntimeError):
 class BenchmarkCaseInput:
     task: BenchmarkTask
     model: str | None = None
+    effort: str | None = None
 
 
 class DeterministicEvaluator(Evaluator):
@@ -71,7 +72,9 @@ class Benchmark:
         self.progress = progress or (lambda _: None)
         self.last_report: Any = None
 
-    async def run_task(self, task: BenchmarkTask, *, model: str | None = None) -> BenchmarkResult:
+    async def run_task(
+        self, task: BenchmarkTask, *, model: str | None = None, effort: str | None = None
+    ) -> BenchmarkResult:
         self.progress(f"[{task.id}] checking verifier sandbox")
         try:
             self.verifier.preflight(cwd=task.path)
@@ -85,6 +88,7 @@ class Benchmark:
                 source_repo_root=self.source_repo_root or _find_repository_root(task.path),
                 prompt=task.instruction,
                 model=model,
+                effort=effort,
             )
             if agent_result.exit_code != 0:
                 output_parts = []
@@ -122,18 +126,19 @@ class Benchmark:
             difficulty=task.difficulty,
             agent_name=self.agent_name,
             model=model,
+            effort=effort,
             agent=agent_result,
             verification=verification,
         )
 
     async def run(
-        self, tasks: list[BenchmarkTask], *, model: str | None = None
+        self, tasks: list[BenchmarkTask], *, model: str | None = None, effort: str | None = None
     ) -> list[BenchmarkResult]:
         """Evaluate all tasks as Pydantic Evals cases and return structured outputs."""
         cases = [
             Case(
                 name=task.id,
-                inputs=BenchmarkCaseInput(task=task, model=model),
+                inputs=BenchmarkCaseInput(task=task, model=model, effort=effort),
                 metadata={"category": task.category, "difficulty": task.difficulty},
             )
             for task in tasks
@@ -141,7 +146,9 @@ class Benchmark:
         dataset = Dataset(name="vuebench", cases=cases, evaluators=[DeterministicEvaluator()])
 
         async def execute(case_input: BenchmarkCaseInput) -> BenchmarkResult:
-            return await self.run_task(case_input.task, model=case_input.model)
+            return await self.run_task(
+                case_input.task, model=case_input.model, effort=case_input.effort
+            )
 
         # Pydantic Evals is deliberately the experiment/case layer. Correctness
         # remains the VerificationResult produced by Vitest and vue-tsc.
