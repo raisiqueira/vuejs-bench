@@ -1,0 +1,10 @@
+id: wrapper-attrs
+title: Forward button attributes and listeners
+category: components
+difficulty: medium
+runtime:
+  node: 24
+  package_manager: pnpm
+checks:
+  - vitest
+  - vue-tsc

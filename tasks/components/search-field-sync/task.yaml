@@ -1,0 +1,10 @@
+id: search-field-sync
+title: Synchronize a search field with its parent
+category: components
+difficulty: medium
+runtime:
+  node: 24
+  package_manager: pnpm
+checks:
+  - vitest
+  - vue-tsc

@@ -1,0 +1,10 @@
+id: conditional-editor-focus
+title: Focus the editor when it opens
+category: components
+difficulty: medium
+runtime:
+  node: 24
+  package_manager: pnpm
+checks:
+  - vitest
+  - vue-tsc

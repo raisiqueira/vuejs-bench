@@ -1,0 +1,10 @@
+id: scoped-slots
+title: Fix scoped item slots and optional header
+category: components
+difficulty: medium
+runtime:
+  node: 24
+  package_manager: pnpm
+checks:
+  - vitest
+  - vue-tsc

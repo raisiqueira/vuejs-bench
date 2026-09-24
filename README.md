@@ -1,15 +1,17 @@
 # VueBench
 
-VueBench is a small benchmark for evaluating coding agents on Vue.js engineering tasks. It
-currently focuses on three deliberately small Vue 3 reactivity bugs and uses deterministic
-Vitest and `vue-tsc` checks as the correctness authority.
+VueBench is a benchmark for evaluating coding agents on Vue.js engineering tasks. It
+contains 17 Vue 3 cases and uses deterministic Vitest and `vue-tsc` checks as the
+correctness authority.
 
 ## Current scope
 
-The MVP covers Vue 3 reactivity only: reactive destructuring, watcher sources, and choosing
-`shallowRef` for a root-reactive immutable catalog. It can run Codex, Claude Code, OpenCode, or
-Ori Code (with OpenRouter models) as host-native agents while using one deterministic
-grading pipeline for all of them.
+The cases cover reactivity, component contracts, list identity, slots, directives,
+accessibility, shared state across Vue Router pages, and component caching. Dedicated
+cases measure adoption of newer Vue APIs. All tasks use Vue 3 and
+Vite; none requires Nuxt. VueBench can run Codex, Claude Code, OpenCode, or Ori Code
+(with OpenRouter models) as host-native agents while using one deterministic grading
+pipeline for all of them.
 
 ## Architecture
 

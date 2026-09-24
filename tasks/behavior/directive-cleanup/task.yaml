@@ -1,0 +1,10 @@
+id: directive-cleanup
+title: Clean up a click-outside directive
+category: behavior
+difficulty: medium
+runtime:
+  node: 24
+  package_manager: pnpm
+checks:
+  - vitest
+  - vue-tsc

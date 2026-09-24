@@ -1,0 +1,10 @@
+id: cart-shared-state
+title: Share a cart across Vue Router pages
+category: state
+difficulty: hard
+runtime:
+  node: 24
+  package_manager: pnpm
+checks:
+  - vitest
+  - vue-tsc

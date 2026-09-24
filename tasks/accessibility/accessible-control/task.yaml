@@ -1,0 +1,10 @@
+id: accessible-control
+title: Make a Save control accessible
+category: accessibility
+difficulty: easy
+runtime:
+  node: 24
+  package_manager: pnpm
+checks:
+  - vitest
+  - vue-tsc

@@ -1,0 +1,10 @@
+id: computed-side-effects
+title: Remove side effects from a computed total
+category: reactivity
+difficulty: medium
+runtime:
+  node: 24
+  package_manager: pnpm
+checks:
+  - vitest
+  - vue-tsc

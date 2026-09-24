@@ -1,0 +1,10 @@
+id: keep-alive-draft
+title: Preserve a draft and refresh cached data
+category: components
+difficulty: hard
+runtime:
+  node: 24
+  package_manager: pnpm
+checks:
+  - vitest
+  - vue-tsc

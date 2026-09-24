@@ -1,0 +1,10 @@
+id: list-identity
+title: Keep row state with the right record
+category: components
+difficulty: medium
+runtime:
+  node: 24
+  package_manager: pnpm
+checks:
+  - vitest
+  - vue-tsc

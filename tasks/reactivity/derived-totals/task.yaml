@@ -1,0 +1,10 @@
+id: derived-totals
+title: Derive totals from products
+category: reactivity
+difficulty: medium
+runtime:
+  node: 24
+  package_manager: pnpm
+checks:
+  - vitest
+  - vue-tsc

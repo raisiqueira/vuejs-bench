@@ -35,15 +35,44 @@ REPO_ROOT = Path(__file__).parents[1]
 TASKS_ROOT = REPO_ROOT / "tasks"
 
 
-def test_discovery_loads_all_reactivity_tasks() -> None:
+def test_discovery_loads_all_tasks() -> None:
     tasks = discover_tasks(TASKS_ROOT)
     assert [task.id for task in tasks] == [
+        "accessible-control",
+        "directive-cleanup",
+        "conditional-editor-focus",
+        "custom-v-model",
+        "keep-alive-draft",
+        "list-identity",
+        "prop-mutation",
+        "scoped-slots",
+        "search-field-sync",
+        "wrapper-attrs",
+        "computed-side-effects",
+        "derived-totals",
         "incorrect-watch-source",
         "reactive-destructure",
         "shallow-ref",
+        "stale-async-search",
+        "cart-shared-state",
     ]
     assert all(task.instruction for task in tasks)
     assert all(task.starter_path.is_dir() for task in tasks)
+
+
+@pytest.mark.parametrize(
+    ("task_id", "api"),
+    [
+        ("search-field-sync", "defineModel"),
+        ("conditional-editor-focus", "useTemplateRef"),
+    ],
+)
+def test_new_api_tasks_do_not_name_the_solution_in_agent_material(task_id: str, api: str) -> None:
+    task = load_task(TASKS_ROOT / "components" / task_id / "task.yaml")
+    assert api.lower() not in f"{task.path} {task.title} {task.instruction}".lower()
+    for path in task.starter_path.rglob("*"):
+        if path.is_file() and "node_modules" not in path.parts:
+            assert api.lower() not in path.read_text().lower()
 
 
 def test_task_yaml_and_instruction_are_typed() -> None:

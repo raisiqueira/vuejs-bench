@@ -1,0 +1,10 @@
+id: stale-async-search
+title: Ignore stale asynchronous search results
+category: reactivity
+difficulty: hard
+runtime:
+  node: 24
+  package_manager: pnpm
+checks:
+  - vitest
+  - vue-tsc

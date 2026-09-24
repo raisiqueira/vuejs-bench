@@ -1,0 +1,10 @@
+id: custom-v-model
+title: Synchronize a custom v-model field
+category: components
+difficulty: easy
+runtime:
+  node: 24
+  package_manager: pnpm
+checks:
+  - vitest
+  - vue-tsc

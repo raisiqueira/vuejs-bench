@@ -1,0 +1,10 @@
+id: prop-mutation
+title: Restore parent-owned component state
+category: components
+difficulty: easy
+runtime:
+  node: 24
+  package_manager: pnpm
+checks:
+  - vitest
+  - vue-tsc
