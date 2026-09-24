@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from pydantic_evals.evaluators import EvaluatorContext
 
 from vuebench import cli
-from vuebench.agents import ClaudeRunner, OpenCodeRunner, OriRunner, create_agent_runner
+from vuebench.agents import ClaudeRunner, GrokRunner, OpenCodeRunner, OriRunner, create_agent_runner
 from vuebench.agents.codex import (
     DEFAULT_TIMEOUT_SECONDS,
     CodexRunner,
@@ -732,7 +732,45 @@ def test_native_agent_commands_are_noninteractive_and_model_aware(tmp_path: Path
     assert ori_environment["BUN_TMPDIR"] == str(tmp_path)
     assert ori_environment["BUN_INSTALL_CACHE_DIR"] == str(tmp_path / "bun-cache")
 
+    auth_path = tmp_path / "grok-auth.json"
+    auth_path.write_text('{"token":"test"}')
+    grok_scratch = tmp_path / "grok-scratch"
+    grok_scratch.mkdir()
+    grok = GrokRunner(executable="grok-test", auth_path=auth_path)
+    grok_command = grok.command(
+        cwd=tmp_path,
+        source_repo_root=REPO_ROOT,
+        model="grok-test-model",
+        effort="high",
+        prompt="fix it",
+    )
+    assert grok_command[-14:] == [
+        "grok-test",
+        "--cwd",
+        str(tmp_path),
+        "--always-approve",
+        "--no-alt-screen",
+        "--no-plan",
+        "--output-format",
+        "plain",
+        "--reasoning-effort",
+        "high",
+        "--model",
+        "grok-test-model",
+        "--single",
+        "fix it",
+    ]
+    assert grok.prompt_input("fix it") is None
+    grok_environment = grok.process_environment(scratch=grok_scratch)
+    scratch_auth = Path(grok_environment["GROK_AUTH_PATH"])
+    assert grok_environment["HOME"] == str(grok_scratch)
+    assert Path(grok_environment["GROK_CONFIG_PATH"]).read_text() == ""
+    assert grok_environment["GROK_DISABLE_AUTOUPDATER"] == "1"
+    assert scratch_auth.read_text() == '{"token":"test"}'
+    assert scratch_auth.stat().st_mode & 0o777 == 0o600
+
     assert isinstance(create_agent_runner("claude", timeout_seconds=12), ClaudeRunner)
+    assert isinstance(create_agent_runner("grok", timeout_seconds=12), GrokRunner)
 
 
 def test_native_agent_profile_blocks_writes_outside_workspace(tmp_path: Path) -> None:

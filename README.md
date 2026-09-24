@@ -9,8 +9,8 @@ correctness authority.
 The cases cover reactivity, component contracts, list identity, slots, directives,
 accessibility, shared state across Vue Router pages, and component caching. Dedicated
 cases measure adoption of newer Vue APIs. All tasks use Vue 3 and
-Vite; none requires Nuxt. VueBench can run Codex, Claude Code, OpenCode, or Ori Code
-(with OpenRouter models) as host-native agents while using one deterministic grading
+Vite; none requires Nuxt. VueBench can run Codex, Claude Code, OpenCode, Ori Code
+(with OpenRouter models), or Grok Build as host-native agents while using one deterministic grading
 pipeline for all of them.
 
 ## Architecture
@@ -52,7 +52,7 @@ non-macOS hosts are not supported by this host-native runner architecture yet.
 - Node.js 24+ (task runtimes below 24 are rejected)
 - pnpm 11+
 - Docker Sandboxes CLI 0.39+ (`sbx`), required for production verification runs
-- At least one authenticated host CLI: Codex, Claude Code, OpenCode, or Ori
+- At least one authenticated host CLI: Codex, Claude Code, OpenCode, Ori, or Grok Build
 
 ## Running
 
@@ -64,6 +64,7 @@ uv run vuebench --task reactive-destructure --agent codex --model gpt-6-luna --e
 uv run vuebench run --task reactive-destructure --agent claude --model sonnet --effort high
 uv run vuebench run --task reactive-destructure --agent opencode --model openai/gpt-5 --effort high
 uv run vuebench run --task reactive-destructure --agent ori --model z-ai/glm-5.3-flash --effort high
+uv run vuebench run --task reactive-destructure --agent grok --model grok-4.7-build-fast --effort high
 ```
 
 Omitting the command defaults to `run`, including when using the Python module entry point.
@@ -79,9 +80,14 @@ reasoning effort. VueBench translates `--effort` to each agent's native interfac
 | Claude Code | `--effort` | `low`, `medium`, `high`, `xhigh`, `max` |
 | OpenCode | `--variant` | Provider/model-dependent |
 | Ori Code | `--reasoning-effort` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; model/harness-dependent |
+| Grok Build | `--reasoning-effort` | Model-dependent |
 
 VueBench forwards the requested value without substituting another level. The selected agent exits
 with an execution error when its model or provider does not support that value.
+
+The Grok adapter uses the official headless mode, isolates writable state from the user's Grok
+home, and copies only the existing `grok login` credential into disposable runner scratch. An
+`XAI_API_KEY` environment variable also works without a saved login.
 
 Every run writes structured JSON to `results/<timestamp>-<scope>-<agent>.json`. Use `--output`
 to choose a path or `--no-save` to disable persistence. The JSON includes timestamps, agent,
