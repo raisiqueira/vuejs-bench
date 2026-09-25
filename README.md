@@ -89,6 +89,12 @@ The Grok adapter uses the official headless mode, isolates writable state from t
 home, and copies only the existing `grok login` credential into disposable runner scratch. An
 `XAI_API_KEY` environment variable also works without a saved login.
 
+The Codex adapter likewise gives each trial a disposable `CODEX_HOME` for its state database and
+copies an existing `auth.json` from the user's Codex home into that scratch directory. The copy is
+removed with the trial and never placed in the candidate workspace. Its outer Seatbelt profile
+permits pseudo-terminal devices needed for shell commands and remains the isolation boundary;
+Codex's own sandbox mode is disabled because macOS rejects a second Seatbelt profile inside it.
+
 Every run writes structured JSON to `results/<timestamp>-<scope>-<agent>.json`. Use `--output`
 to choose a path or `--no-save` to disable persistence. The JSON includes timestamps, agent,
 model, effort, process output/diff, deterministic check output, and infrastructure errors.

@@ -79,20 +79,31 @@ class NativeAgentRunner(ABC):
         return environment
 
     @staticmethod
-    def sandbox_profile(*, source_repo_root: Path, workspace: Path, scratch: Path) -> str:
+    def sandbox_profile(
+        *, source_repo_root: Path, workspace: Path, scratch: Path, allow_pty: bool = False
+    ) -> str:
         """Deny source reads and writes outside the trial workspace and runner scratch."""
         source = NativeAgentRunner._safe_profile_path(source_repo_root, "source repository")
         trial = NativeAgentRunner._safe_profile_path(workspace, "trial workspace")
         temporary = NativeAgentRunner._safe_profile_path(scratch, "agent scratch")
+        write_exceptions = [
+            f'(require-not (subpath "{trial}"))',
+            f'(require-not (subpath "{temporary}"))',
+            '(require-not (literal "/dev/null"))',
+        ]
+        if allow_pty:
+            write_exceptions.extend(
+                [
+                    '(require-not (literal "/dev/ptmx"))',
+                    '(require-not (regex "^/dev/ttys[0-9A-Za-z]+$"))',
+                ]
+            )
         return " ".join(
             [
                 "(version 1)",
                 "(allow default)",
                 f'(deny file-read* (subpath "{source}"))',
-                "(deny file-write* (require-all "
-                f'(require-not (subpath "{trial}")) '
-                f'(require-not (subpath "{temporary}")) '
-                '(require-not (literal "/dev/null"))))',
+                f"(deny file-write* (require-all {' '.join(write_exceptions)}))",
             ]
         )
 

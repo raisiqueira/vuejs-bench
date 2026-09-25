@@ -1,4 +1,6 @@
 import json
+import os
+import shutil
 from pathlib import Path
 
 from vuebench.agents.native import (
@@ -32,9 +34,23 @@ class CodexRunner(NativeAgentRunner):
         )
         self.executable = executable
 
+    def process_environment(self, *, scratch: Path) -> dict[str, str]:
+        environment = super().process_environment(scratch=scratch)
+        codex_home = scratch / "codex"
+        codex_home.mkdir(mode=0o700)
+        auth_source = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "auth.json"
+        if auth_source.is_file():
+            auth_copy = codex_home / "auth.json"
+            shutil.copyfile(auth_source, auth_copy)
+            auth_copy.chmod(0o600)
+        environment["CODEX_HOME"] = str(codex_home)
+        return environment
+
     def _agent_command(
         self, *, cwd: Path, model: str | None, effort: str | None, prompt: str | None
     ) -> list[str]:
+        # The outer Seatbelt profile already confines reads and writes. macOS
+        # rejects Codex's attempt to apply a second Seatbelt profile inside it.
         command = [
             self.executable,
             "exec",
@@ -43,7 +59,7 @@ class CodexRunner(NativeAgentRunner):
             "--cd",
             str(cwd),
             "--sandbox",
-            "workspace-write",
+            "danger-full-access",
             "-c",
             'approval_policy="never"',
             "--ephemeral",
@@ -61,6 +77,8 @@ class CodexRunner(NativeAgentRunner):
         source_repo_root: Path,
         workspace: Path | None = None,
         scratch: Path | None = None,
+        *,
+        allow_pty: bool = True,
     ) -> str:
         # Keep the one-argument form for callers inspecting only the legacy
         # source-read rule. Real runs always include workspace write isolation.
@@ -71,6 +89,7 @@ class CodexRunner(NativeAgentRunner):
             source_repo_root=source_repo_root,
             workspace=workspace,
             scratch=scratch or workspace,
+            allow_pty=allow_pty,
         )
 
 

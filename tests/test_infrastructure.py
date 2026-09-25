@@ -649,7 +649,7 @@ def test_codex_command_is_noninteractive_and_model_is_optional(tmp_path: Path) -
         "--cd",
         str(tmp_path),
         "--sandbox",
-        "workspace-write",
+        "danger-full-access",
         "-c",
         'approval_policy="never"',
         "--ephemeral",
@@ -669,6 +669,27 @@ def test_codex_command_is_noninteractive_and_model_is_optional(tmp_path: Path) -
         "gpt-test",
     ]
     assert runner.timeout_seconds == DEFAULT_TIMEOUT_SECONDS
+
+
+def test_codex_uses_disposable_home_for_state_and_auth(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user_home = tmp_path / "user-codex"
+    user_home.mkdir()
+    (user_home / "auth.json").write_text('{"token":"test"}')
+    monkeypatch.setenv("CODEX_HOME", str(user_home))
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+
+    environment = CodexRunner().process_environment(scratch=scratch)
+    codex_home = scratch / "codex"
+    auth_copy = codex_home / "auth.json"
+
+    assert environment["CODEX_HOME"] == str(codex_home)
+    assert environment["TMPDIR"] == str(scratch)
+    assert auth_copy.read_text() == '{"token":"test"}'
+    assert auth_copy.stat().st_mode & 0o777 == 0o600
+    assert (user_home / "auth.json").read_text() == '{"token":"test"}'
 
 
 def test_native_agent_commands_are_noninteractive_and_model_aware(tmp_path: Path) -> None:
@@ -805,6 +826,35 @@ def test_native_agent_profile_blocks_writes_outside_workspace(tmp_path: Path) ->
     assert (workspace / "file").read_text() == "allowed"
     assert (scratch / "file").read_text() == "temporary"
     assert not (outside / "file").exists()
+
+
+def test_codex_profile_allows_pty_inside_outer_sandbox(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    source = tmp_path / "source"
+    scratch = tmp_path / "scratch"
+    workspace.mkdir()
+    source.mkdir()
+    scratch.mkdir()
+
+    result = subprocess.run(
+        [
+            "/usr/bin/sandbox-exec",
+            "-p",
+            CodexRunner.sandbox_profile(source, workspace, scratch),
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            "import os, pty; master, slave = pty.openpty(); "
+            "print(os.ttyname(slave)); os.close(master); os.close(slave)",
+        ],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().startswith("/dev/ttys")
 
 
 def test_codex_refuses_missing_or_unsupported_seatbelt(
