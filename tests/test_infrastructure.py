@@ -722,6 +722,7 @@ def test_native_agent_commands_are_noninteractive_and_model_aware(tmp_path: Path
     ]
     assert "--pure" in opencode_command
     assert "--auto" in opencode_command
+    assert opencode_command[8:10] == ["--agent", "build"]
 
     ori = OriRunner(executable="ori-test")
     ori_command = ori.command(
@@ -792,6 +793,42 @@ def test_native_agent_commands_are_noninteractive_and_model_aware(tmp_path: Path
 
     assert isinstance(create_agent_runner("claude", timeout_seconds=12), ClaudeRunner)
     assert isinstance(create_agent_runner("grok", timeout_seconds=12), GrokRunner)
+
+
+def test_opencode_state_is_confined_to_scratch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user_data = tmp_path / "user-data" / "opencode"
+    user_config = tmp_path / "user-config" / "opencode"
+    user_data.mkdir(parents=True)
+    user_config.mkdir(parents=True)
+    (user_data / "auth.json").write_text('{"provider":{"type":"api"}}')
+    (user_config / "opencode.json").write_text('{"provider":{}}')
+    (user_config / "opencode.jsonc").write_text('{"model":"test/model"}')
+    monkeypatch.setenv("XDG_DATA_HOME", str(user_data.parent))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(user_config.parent))
+    monkeypatch.setenv("OPENCODE_CONFIG", str(user_config / "opencode.json"))
+    monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(user_config))
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+
+    environment = OpenCodeRunner().process_environment(scratch=scratch)
+
+    assert environment["HOME"] == str(scratch)
+    assert environment["XDG_DATA_HOME"] == str(scratch / "xdg-data")
+    assert environment["XDG_CONFIG_HOME"] == str(scratch / "xdg-config")
+    assert environment["BUN_TMPDIR"] == str(scratch)
+    assert environment["OPENCODE_DISABLE_AUTOUPDATE"] == "1"
+    assert "OPENCODE_CONFIG" not in environment
+    assert "OPENCODE_CONFIG_DIR" not in environment
+    for name, original in (
+        ("xdg-data/opencode/auth.json", user_data / "auth.json"),
+        ("xdg-config/opencode/opencode.json", user_config / "opencode.json"),
+        ("xdg-config/opencode/opencode.jsonc", user_config / "opencode.jsonc"),
+    ):
+        copied = scratch / name
+        assert copied.read_text() == original.read_text()
+        assert copied.stat().st_mode & 0o777 == 0o600
 
 
 def test_native_agent_profile_blocks_writes_outside_workspace(tmp_path: Path) -> None:
@@ -911,7 +948,9 @@ def test_codex_diff_includes_changes_committed_by_agent(tmp_path: Path) -> None:
     assert ".vuebench-tmp" not in result.diff
 
 
-def test_native_agent_uses_runner_scratch_outside_candidate_workspace(tmp_path: Path) -> None:
+def test_native_agent_uses_runner_scratch_outside_candidate_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     workspace = tmp_path / "workspace"
     source_root = tmp_path / "benchmark-source"
     _initialize_trial_repo(workspace)
@@ -919,9 +958,11 @@ def test_native_agent_uses_runner_scratch_outside_candidate_workspace(tmp_path: 
     executable = tmp_path / "fake-codex"
     executable.write_text(
         "#!/bin/sh\nprintf '%s' \"$TMPDIR\" > runner-tmpdir.txt\n"
+        "printf '%s' \"$PWD\" > runner-pwd.txt\n"
         'printf scratch > "$TMPDIR/probe.txt"\n'
     )
     executable.chmod(0o755)
+    monkeypatch.setenv("PWD", str(source_root))
 
     result = asyncio.run(
         CodexRunner(executable=str(executable)).run(
@@ -934,6 +975,7 @@ def test_native_agent_uses_runner_scratch_outside_candidate_workspace(tmp_path: 
     assert scratch_path.parent != workspace
     assert scratch_path.name.startswith("vuebench-agent-")
     assert not scratch_path.exists()
+    assert (workspace / "runner-pwd.txt").read_text() == str(workspace)
     assert ".vuebench-tmp" not in result.diff
 
 

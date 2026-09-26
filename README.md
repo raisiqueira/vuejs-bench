@@ -95,6 +95,13 @@ removed with the trial and never placed in the candidate workspace. Its outer Se
 permits pseudo-terminal devices needed for shell commands and remains the isolation boundary;
 Codex's own sandbox mode is disabled because macOS rejects a second Seatbelt profile inside it.
 
+The OpenCode adapter gives each trial disposable XDG and Bun directories for logs and state. It
+copies the user's saved credentials and JSON/JSONC config into that scratch directory, so provider
+settings remain available without writing to the user's OpenCode home. It selects OpenCode's
+`build` agent so a user's default `plan` agent cannot leave the trial unchanged. Use a model ID from
+`opencode models`, including its provider prefix (for example,
+`openrouter/moonshotai/kimi-k2.7-code`).
+
 Every run writes structured JSON to `results/<timestamp>-<scope>-<agent>.json`. Use `--output`
 to choose a path or `--no-save` to disable persistence. The JSON includes timestamps, agent,
 model, effort, process output/diff, deterministic check output, and infrastructure errors.

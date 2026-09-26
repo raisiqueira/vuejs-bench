@@ -160,6 +160,7 @@ class NativeAgentRunner(ABC):
                 scratch=scratch,
             )
             environment = self.process_environment(scratch=scratch)
+            environment["PWD"] = str(cwd.resolve())
             process = await asyncio.create_subprocess_exec(
                 *command,
                 cwd=cwd,
