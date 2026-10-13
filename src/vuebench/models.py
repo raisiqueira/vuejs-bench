@@ -61,3 +61,11 @@ class BenchmarkResult(BaseModel):
     effort: str | None = None
     agent: AgentResult
     verification: VerificationResult
+
+
+class CaseFailure(BaseModel):
+    """A case that ended without a gradable result."""
+
+    task_id: str
+    error: str
+    agent: AgentResult | None = None

@@ -7,17 +7,22 @@ from pydantic_evals import Case, Dataset
 from pydantic_evals.evaluators import EvaluationReason, Evaluator, EvaluatorContext
 
 from vuebench.agents.base import AgentRunner
-from vuebench.models import BenchmarkResult, BenchmarkTask
+from vuebench.models import AgentResult, BenchmarkResult, BenchmarkTask, CaseFailure
 from vuebench.tasks.workspace import WorkspaceManager
 from vuebench.verification.runner import HiddenVerifier, VerifierUnavailable
+
+AGENT_OUTPUT_EXCERPT_CHARS = 1_000
 
 
 class BenchmarkExecutionError(RuntimeError):
     """Raised when one or more benchmark cases could not be executed."""
 
-    def __init__(self, failures: list[Any]) -> None:
+    def __init__(
+        self, failures: list[CaseFailure], *, results: list[BenchmarkResult] | None = None
+    ) -> None:
         self.failures = failures
-        details = "; ".join(f"{failure.name}: {failure.error_message}" for failure in failures)
+        self.results = results or []
+        details = "; ".join(f"{failure.task_id}: {failure.error}" for failure in failures)
         super().__init__(f"{len(failures)} benchmark case(s) failed to execute: {details}")
 
 
@@ -27,6 +32,10 @@ class VerificationInfrastructureError(RuntimeError):
 
 class AgentExecutionError(RuntimeError):
     """Raised when an agent process exits before producing a gradable candidate."""
+
+    def __init__(self, message: str, *, agent_result: AgentResult) -> None:
+        super().__init__(message)
+        self.agent_result = agent_result
 
 
 @dataclass
@@ -93,15 +102,14 @@ class Benchmark:
             if agent_result.exit_code != 0:
                 output_parts = []
                 if stderr := agent_result.stderr.strip():
-                    output_parts.append(f"stderr: {stderr}")
+                    output_parts.append(f"stderr: {_tail(stderr)}")
                 if stdout := agent_result.stdout.strip():
-                    output_parts.append(f"stdout: {stdout}")
+                    output_parts.append(f"stdout: {_tail(stdout)}")
                 details = "; ".join(output_parts) or "no output"
-                if len(details) > 2_000:
-                    details = f"{details[:2_000]}..."
                 raise AgentExecutionError(
                     f"{task.id}: {self.agent_name} exited with status "
-                    f"{agent_result.exit_code}: {details}"
+                    f"{agent_result.exit_code}: {details}",
+                    agent_result=agent_result,
                 )
             # Agent runs can last many minutes. Re-check SBX in case its VM or
             # daemon stopped after the pre-paid-work preflight.
@@ -145,18 +153,40 @@ class Benchmark:
         ]
         dataset = Dataset(name="vuebench", cases=cases, evaluators=[DeterministicEvaluator()])
 
+        failed_agent_runs: dict[str, AgentResult] = {}
+
         async def execute(case_input: BenchmarkCaseInput) -> BenchmarkResult:
-            return await self.run_task(
-                case_input.task, model=case_input.model, effort=case_input.effort
-            )
+            try:
+                return await self.run_task(
+                    case_input.task, model=case_input.model, effort=case_input.effort
+                )
+            except AgentExecutionError as error:
+                failed_agent_runs[case_input.task.id] = error.agent_result
+                raise
 
         # Pydantic Evals is deliberately the experiment/case layer. Correctness
         # remains the VerificationResult produced by Vitest and vue-tsc.
         report = await dataset.evaluate(execute, max_concurrency=1, progress=False)
         self.last_report = report
+        results = [evaluation.output for evaluation in report.cases]
         if report.failures:
-            raise BenchmarkExecutionError(report.failures)
-        return [evaluation.output for evaluation in report.cases]
+            failures = [
+                CaseFailure(
+                    task_id=failure.name,
+                    error=failure.error_message,
+                    agent=failed_agent_runs.get(failure.name),
+                )
+                for failure in report.failures
+            ]
+            raise BenchmarkExecutionError(failures, results=results)
+        return results
+
+
+def _tail(text: str) -> str:
+    """Keep the end of agent output, where CLIs report the error that stopped them."""
+    if len(text) <= AGENT_OUTPUT_EXCERPT_CHARS:
+        return text
+    return f"...{text[-AGENT_OUTPUT_EXCERPT_CHARS:]}"
 
 
 def default_tasks_root() -> Path:

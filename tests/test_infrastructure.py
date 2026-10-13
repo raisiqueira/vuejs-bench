@@ -22,7 +22,13 @@ from vuebench.agents.codex import (
     CodexSandboxUnavailable,
 )
 from vuebench.benchmark import Benchmark, BenchmarkExecutionError, DeterministicEvaluator
-from vuebench.models import AgentResult, BenchmarkResult, RuntimeConfig, VerificationResult
+from vuebench.models import (
+    AgentResult,
+    BenchmarkResult,
+    CaseFailure,
+    RuntimeConfig,
+    VerificationResult,
+)
 from vuebench.tasks.discovery import discover_tasks, load_task
 from vuebench.tasks.workspace import WorkspaceManager
 from vuebench.verification.runner import (
@@ -1216,6 +1222,109 @@ def test_benchmark_does_not_grade_a_nonzero_agent_exit() -> None:
         asyncio.run(benchmark.run([task]))
 
 
+def test_benchmark_error_keeps_the_end_of_long_agent_output() -> None:
+    task = load_task(TASKS_ROOT / "reactivity" / "reactive-destructure" / "task.yaml")
+    stderr = "Reading prompt from stdin...\n" + "transcript line\n" * 500 + "ERROR: stream lost"
+
+    class VerboseFailingAgent(FakeAgent):
+        async def run(self, **kwargs: object) -> AgentResult:
+            return AgentResult(
+                exit_code=1, stdout="", stderr=stderr, diff="", duration_seconds=0.01
+            )
+
+    benchmark = Benchmark(
+        agent=VerboseFailingAgent(),
+        workspace_manager=NoInstallWorkspaceManager(),
+        verifier=SuccessfulHiddenVerifier(),
+    )
+
+    with pytest.raises(BenchmarkExecutionError) as raised:
+        asyncio.run(benchmark.run([task]))
+
+    message = str(raised.value)
+    assert message.endswith("ERROR: stream lost")
+    assert "Reading prompt from stdin" not in message
+    [failure] = raised.value.failures
+    assert failure.task_id == task.id
+    assert failure.agent is not None
+    assert failure.agent.stderr == stderr
+
+
+def test_benchmark_error_keeps_results_of_completed_cases() -> None:
+    failing_task = load_task(TASKS_ROOT / "components" / "search-field-sync" / "task.yaml")
+    passing_task = load_task(TASKS_ROOT / "reactivity" / "reactive-destructure" / "task.yaml")
+
+    class FirstRunFailsAgent(FakeAgent):
+        calls = 0
+
+        async def run(self, **kwargs: object) -> AgentResult:
+            self.calls += 1
+            if self.calls == 1:
+                return AgentResult(
+                    exit_code=1, stdout="", stderr="quota", diff="", duration_seconds=0.01
+                )
+            return await super().run(**kwargs)
+
+    benchmark = Benchmark(
+        agent=FirstRunFailsAgent(),
+        workspace_manager=NoInstallWorkspaceManager(),
+        verifier=SuccessfulHiddenVerifier(),
+    )
+
+    with pytest.raises(BenchmarkExecutionError) as raised:
+        asyncio.run(benchmark.run([failing_task, passing_task]))
+
+    assert [result.task_id for result in raised.value.results] == [passing_task.id]
+    assert [failure.task_id for failure in raised.value.failures] == [failing_task.id]
+
+
+def test_cli_partial_result_saves_completed_results_and_failures(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    task = load_task(TASKS_ROOT / "reactivity" / "reactive-destructure" / "task.yaml")
+    completed = BenchmarkResult(
+        task_id=task.id,
+        task_title=task.title,
+        category=task.category,
+        difficulty=task.difficulty,
+        agent=AgentResult(exit_code=0, stdout="", stderr="", diff="", duration_seconds=1),
+        verification=VerificationResult(
+            tests_passed=True,
+            typecheck_passed=True,
+            tests_output="ok",
+            typecheck_output="ok",
+            passed=True,
+        ),
+    )
+    failure = CaseFailure(
+        task_id="search-field-sync",
+        error="codex exited with status 1",
+        agent=AgentResult(
+            exit_code=1, stdout="", stderr="full stderr", diff="", duration_seconds=1
+        ),
+    )
+
+    class PartiallyFailingBenchmark:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        async def run(self, tasks: list[object], **kwargs: object) -> list[object]:
+            raise BenchmarkExecutionError([failure], results=[completed])
+
+    output = tmp_path / "result.json"
+    monkeypatch.setattr(cli, "Benchmark", PartiallyFailingBenchmark)
+    monkeypatch.setattr(cli, "discover_tasks", lambda _: [task])
+    monkeypatch.setattr(sys, "argv", ["vuebench", "run", "--output", str(output)])
+
+    with pytest.raises(SystemExit, match="Partial result"):
+        cli.main()
+
+    payload = json.loads(output.read_text())
+    assert payload["status"] == "failed"
+    assert [result["task_id"] for result in payload["results"]] == [task.id]
+    assert payload["failures"] == [failure.model_dump(mode="json")]
+
+
 def test_cli_reports_case_execution_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     task = load_task(TASKS_ROOT / "reactivity" / "reactive-destructure" / "task.yaml")
 
@@ -1231,7 +1340,7 @@ def test_cli_reports_case_execution_failure(monkeypatch: pytest.MonkeyPatch) -> 
             effort: str | None = None,
         ) -> list[object]:
             raise BenchmarkExecutionError(
-                [SimpleNamespace(name=tasks[0].id, error_message="codex unavailable")]
+                [CaseFailure(task_id=tasks[0].id, error="codex unavailable")]
             )
 
     monkeypatch.setattr(cli, "Benchmark", FailingBenchmark)

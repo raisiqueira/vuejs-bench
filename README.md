@@ -105,6 +105,9 @@ settings remain available without writing to the user's OpenCode home. It select
 Every run writes structured JSON to `results/<timestamp>-<scope>-<agent>.json`. Use `--output`
 to choose a path or `--no-save` to disable persistence. The JSON includes timestamps, agent,
 model, effort, process output/diff, deterministic check output, and infrastructure errors.
+If a case cannot be executed, the file still keeps every completed result and lists each
+failed case under `failures`, with the full agent output when the agent process exited
+non-zero.
 
 Manage the persistent verifier explicitly:
 

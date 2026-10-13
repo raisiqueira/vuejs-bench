@@ -8,7 +8,7 @@ from typing import Any
 
 from vuebench.agents import AGENT_NAMES, DEFAULT_TIMEOUT_SECONDS, create_agent_runner
 from vuebench.benchmark import Benchmark, BenchmarkExecutionError, default_tasks_root
-from vuebench.models import BenchmarkResult
+from vuebench.models import BenchmarkResult, CaseFailure
 from vuebench.tasks.discovery import discover_tasks
 from vuebench.verification.runner import (
     DEFAULT_COMMAND_TIMEOUT_SECONDS,
@@ -113,6 +113,7 @@ def _result_payload(
     model: str | None,
     effort: str | None,
     results: list[BenchmarkResult] | None = None,
+    failures: list[CaseFailure] | None = None,
     error: str | None = None,
 ) -> dict[str, Any]:
     return {
@@ -125,6 +126,7 @@ def _result_payload(
         "effort": effort,
         "error": error,
         "results": [result.model_dump(mode="json") for result in results or []],
+        "failures": [failure.model_dump(mode="json") for failure in failures or []],
     }
 
 
@@ -206,6 +208,8 @@ def main() -> None:
                     agent=args.agent,
                     model=args.model,
                     effort=args.effort,
+                    results=exc.results,
+                    failures=exc.failures,
                     error=message,
                 ),
             )
