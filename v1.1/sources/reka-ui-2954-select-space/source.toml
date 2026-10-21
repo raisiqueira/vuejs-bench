@@ -1,0 +1,30 @@
+[task]
+id = "reka-ui-2954-select-space"
+title = "Select: Space on a focused item does not select it"
+category = "accessibility"
+difficulty = "easy"
+
+[source]
+repo = "unovue/reka-ui"
+issue = 2954
+pr = 2955
+fix_commit = "f4089fc9ddae969909ae0eeb454f3125281b5ed1"
+base_commit = "0a65ee1c9f8a69ced20e74c6425232b2c52650a9"
+issue_created_at = "2026-09-21T08:43:21Z"
+fix_merged_at = "2026-09-21T12:23:22Z"
+
+[runtime]
+pnpm = "10.13.1"
+
+[tests]
+workdir = "packages/core"
+config = "vite.config.ts"
+vitest_args = []
+protected = [
+  "package.json",
+  "packages/core/package.json",
+  "packages/core/vite.config.ts",
+  "packages/core/vitest.global.ts",
+  "packages/core/vitest.setup.ts",
+  "packages/core/src/test",
+]

@@ -1,0 +1,16 @@
+#!/bin/bash
+set -uo pipefail
+
+LOG_DIR=/logs/verifier
+mkdir -p "$LOG_DIR"
+echo 0 > "$LOG_DIR/reward.txt"
+
+# Restore the official tests and the trusted test configuration over the candidate.
+cp -a /tests/files/. /testbed/
+
+cd /testbed
+./node_modules/.bin/vitest run --config vitest.config.ts --project unit \
+  --reporter=default --reporter=json --outputFile.json="$LOG_DIR/vitest.json" \
+  packages/core/useFetch/index.test.ts 2>&1 | tee "$LOG_DIR/vitest.log"
+
+node /tests/grade.mjs /tests/config.json "$LOG_DIR/vitest.json" "$LOG_DIR"

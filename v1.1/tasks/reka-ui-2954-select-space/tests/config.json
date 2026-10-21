@@ -1,0 +1,45 @@
+{
+  "task_id": "reka-ui-2954-select-space",
+  "repo_root": "/testbed",
+  "test_files": [
+    "packages/core/src/Select/Select.test.ts"
+  ],
+  "fail_to_pass": [
+    "packages/core/src/Select/Select.test.ts > given Select with multiple props > opening the modal > should toggle the focused item with Space",
+    "packages/core/src/Select/Select.test.ts > given Select with options containing spaces > should prevent scrolling when Space extends the typeahead search",
+    "packages/core/src/Select/Select.test.ts > given default Select > opening the modal > should select the focused item with Space"
+  ],
+  "pass_to_pass": [
+    "packages/core/src/Select/Select.test.ts > given Select in a form > after selecting option and clicking submit button > should trigger submit once",
+    "packages/core/src/Select/Select.test.ts > given Select in a form > after selecting other option and click submit button again > should trigger submit once",
+    "packages/core/src/Select/Select.test.ts > given Select in a form > should have hidden input field",
+    "packages/core/src/Select/Select.test.ts > given Select in a form > should use the nullableValue for the hidden select when the value is nullish",
+    "packages/core/src/Select/Select.test.ts > given Select with multiple props > opening the modal > after selecting a value > after opening the modal again > after selecting another value > should not close the modal",
+    "packages/core/src/Select/Select.test.ts > given Select with multiple props > opening the modal > after selecting a value > after opening the modal again > after selecting another value > should show value correctly",
+    "packages/core/src/Select/Select.test.ts > given Select with multiple props > opening the modal > after selecting a value > after opening the modal again > after unselecting the value > should have data placeholder attribute",
+    "packages/core/src/Select/Select.test.ts > given Select with multiple props > opening the modal > after selecting a value > after opening the modal again > should focus on the selected value",
+    "packages/core/src/Select/Select.test.ts > given Select with multiple props > opening the modal > after selecting a value > after opening the modal again > should render the icon",
+    "packages/core/src/Select/Select.test.ts > given Select with multiple props > opening the modal > after selecting a value > should close the modal",
+    "packages/core/src/Select/Select.test.ts > given Select with multiple props > opening the modal > after selecting a value > should show value correctly",
+    "packages/core/src/Select/Select.test.ts > given Select with multiple props > opening the modal > should pass axe accessibility tests",
+    "packages/core/src/Select/Select.test.ts > given Select with multiple props > opening the modal > should show the modal content",
+    "packages/core/src/Select/Select.test.ts > given Select with multiple props > should pass axe accessibility tests",
+    "packages/core/src/Select/Select.test.ts > given Select with object type > opening the modal > after selecting a value > should close the modal",
+    "packages/core/src/Select/Select.test.ts > given Select with object type > opening the modal > after selecting a value > should show value correctly",
+    "packages/core/src/Select/Select.test.ts > given Select with options containing spaces > should include Space in the typeahead search once typing has started",
+    "packages/core/src/Select/Select.test.ts > given SelectContent cleanup > should clear delayed presence updates when unmounted after closing",
+    "packages/core/src/Select/Select.test.ts > given default Select > opening the modal > after selecting a value > after opening the modal again > should focus on the selected value",
+    "packages/core/src/Select/Select.test.ts > given default Select > opening the modal > after selecting a value > after opening the modal again > should render the icon",
+    "packages/core/src/Select/Select.test.ts > given default Select > opening the modal > after selecting a value > should close the modal",
+    "packages/core/src/Select/Select.test.ts > given default Select > opening the modal > after selecting a value > should show value correctly",
+    "packages/core/src/Select/Select.test.ts > given default Select > opening the modal > should pass axe accessibility tests",
+    "packages/core/src/Select/Select.test.ts > given default Select > opening the modal > should show the modal content",
+    "packages/core/src/Select/Select.test.ts > given default Select > should only render aria-controls while open",
+    "packages/core/src/Select/Select.test.ts > given default Select > should pass axe accessibility tests",
+    "packages/core/src/Select/Select.test.ts > given default Select > should show placeholder",
+    "packages/core/src/Select/Select.test.ts > given default Select > trigger mouse interop > should focus the trigger on click without a preceding pointerdown",
+    "packages/core/src/Select/Select.test.ts > given default Select > trigger mouse interop > should not leave focus on the trigger after opening via mouse click",
+    "packages/core/src/Select/Select.test.ts > given default Select > trigger mouse interop > should not re-focus the trigger on click after opening via pointerdown",
+    "packages/core/src/Select/Select.test.ts > given default Select > trigger mouse interop > should not suppress window mousedown listeners when opening (#1773)"
+  ]
+}

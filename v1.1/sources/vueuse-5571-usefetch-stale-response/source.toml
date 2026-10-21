@@ -1,0 +1,28 @@
+[task]
+id = "vueuse-5571-usefetch-stale-response"
+title = "useFetch: a superseded request overwrites newer data"
+category = "reactivity"
+difficulty = "medium"
+
+[source]
+repo = "vueuse/vueuse"
+issue = 5571
+pr = 5574
+fix_commit = "a4368f57db9f7c6b51c91f594c63417a9f3f4d29"
+base_commit = "83e0043828c00cfbbba9fd310ecd59c5fba14db0"
+issue_created_at = "2026-08-09T03:57:01Z"
+fix_merged_at = "2026-08-13T02:02:24Z"
+
+[runtime]
+pnpm = "11.17.0"
+
+[tests]
+workdir = "."
+config = "vitest.config.ts"
+vitest_args = ["--project", "unit"]
+protected = [
+  "package.json",
+  "packages/core/package.json",
+  "vitest.config.ts",
+  "packages/.test",
+]

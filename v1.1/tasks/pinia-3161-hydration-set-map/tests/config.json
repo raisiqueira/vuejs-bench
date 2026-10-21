@@ -1,0 +1,37 @@
+{
+  "task_id": "pinia-3161-hydration-set-map",
+  "repo_root": "/testbed",
+  "test_files": [
+    "packages/pinia/__tests__/state.spec.ts"
+  ],
+  "fail_to_pass": [
+    "packages/pinia/__tests__/state.spec.ts > State > replaces (does not union) a non-empty reactive Set/Map on hydration"
+  ],
+  "pass_to_pass": [
+    "packages/pinia/__tests__/state.spec.ts > State > can be given a ref",
+    "packages/pinia/__tests__/state.spec.ts > State > can be nested set on store",
+    "packages/pinia/__tests__/state.spec.ts > State > can be nested set on store.$state",
+    "packages/pinia/__tests__/state.spec.ts > State > can be nested set with patch",
+    "packages/pinia/__tests__/state.spec.ts > State > can be set on store",
+    "packages/pinia/__tests__/state.spec.ts > State > can be set on store.$state",
+    "packages/pinia/__tests__/state.spec.ts > State > can be set with patch",
+    "packages/pinia/__tests__/state.spec.ts > State > can directly access state at the store level",
+    "packages/pinia/__tests__/state.spec.ts > State > can hydrate refs",
+    "packages/pinia/__tests__/state.spec.ts > State > can reset the state",
+    "packages/pinia/__tests__/state.spec.ts > State > can reset the state of an empty store",
+    "packages/pinia/__tests__/state.spec.ts > State > custom refs > hydrates custom refs options",
+    "packages/pinia/__tests__/state.spec.ts > State > custom refs > hydrates custom refs setup",
+    "packages/pinia/__tests__/state.spec.ts > State > hydrates Map in option stores",
+    "packages/pinia/__tests__/state.spec.ts > State > hydrates Map in setup stores",
+    "packages/pinia/__tests__/state.spec.ts > State > hydrates Set in option stores",
+    "packages/pinia/__tests__/state.spec.ts > State > hydrates Set in setup stores",
+    "packages/pinia/__tests__/state.spec.ts > State > replaces (does not union) a Set/Map nested in a reactive object on hydration",
+    "packages/pinia/__tests__/state.spec.ts > State > skipHydrate > skips hydration on a reactive Map",
+    "packages/pinia/__tests__/state.spec.ts > State > skipHydrate > skips hydration on a reactive Set",
+    "packages/pinia/__tests__/state.spec.ts > State > skipHydrate > skips hydration on a reactive array",
+    "packages/pinia/__tests__/state.spec.ts > State > state can be watched",
+    "packages/pinia/__tests__/state.spec.ts > State > state can be watched when a ref is given",
+    "packages/pinia/__tests__/state.spec.ts > State > state is reactive",
+    "packages/pinia/__tests__/state.spec.ts > State > unwraps refs"
+  ]
+}

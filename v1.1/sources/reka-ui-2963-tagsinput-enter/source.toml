@@ -1,0 +1,30 @@
+[task]
+id = "reka-ui-2963-tagsinput-enter"
+title = "TagsInput: Enter submits the form before the draft becomes a tag"
+category = "behavior"
+difficulty = "medium"
+
+[source]
+repo = "unovue/reka-ui"
+issue = 2963
+pr = 2966
+fix_commit = "628dcba3d1b0d1b062193a08a482ce588466ce97"
+base_commit = "65b6ced0e2cc0fed200e39cbc1eb8ebbd04616fb"
+issue_created_at = "2026-09-22T13:48:05Z"
+fix_merged_at = "2026-09-23T05:47:55Z"
+
+[runtime]
+pnpm = "10.13.1"
+
+[tests]
+workdir = "packages/core"
+config = "vite.config.ts"
+vitest_args = []
+protected = [
+  "package.json",
+  "packages/core/package.json",
+  "packages/core/vite.config.ts",
+  "packages/core/vitest.global.ts",
+  "packages/core/vitest.setup.ts",
+  "packages/core/src/test",
+]
