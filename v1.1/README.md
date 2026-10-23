@@ -36,7 +36,7 @@ Each generated task has the standard Harbor layout:
 
 - `task.toml`: metadata (issue and PR URLs, base and fix commits, dates), timeouts and network policy.
 - `instruction.md`: the issue text.
-- `environment/Dockerfile`: `node:24` (pinned by digest), pnpm through Corepack, the repo
+- `environment/Dockerfile`: `node:24.22.1` (pinned by digest), pnpm through Corepack, the repo
   at the base commit, and `pnpm install --frozen-lockfile --ignore-scripts`. The Git
   history is removed and replaced by one "Base snapshot" commit with no remote.
 - `solution/solve.sh` + `fix.patch`: the oracle. It applies the non-test part of the fix PR.
@@ -92,23 +92,144 @@ v1.1/scripts/validate.sh -k 5 pinia-3161-hydration-set-map
 
 Results go to `v1.1/jobs/validate-<timestamp>/summary.tsv`.
 
-### OpenCode
+## Agents
 
-OpenCode is a built-in Harbor agent. Harbor installs `opencode-ai` in the task
-container and runs `opencode run --format=json`. Give the model as `provider/model`
-and export the API key of that provider. Pin the OpenCode version for comparable runs:
+Every agent uses the same pattern:
+
+- one task: `-p v1.1/tasks/<task-id>`
+- all tasks: `-p v1.1/tasks`
+- effort: `--effort <level>` for Codex, Claude Code and Grok Build. OpenCode has no
+  effort option and fails with `--effort`. Use `--ak variant=<variant>` for it.
+- attempts: `-k 3` runs three attempts per task (pass@3).
+- agent version: pin it with `--ak version=<version>` for comparable runs.
+
+The examples use these variables:
 
 ```bash
-export ANTHROPIC_API_KEY=...
-harbor run -p v1.1/tasks/reka-ui-2954-select-space \
-  -a opencode -m anthropic/claude-sonnet-5-5 --ak version=1.19.3
-
-export OPENROUTER_API_KEY=...
-harbor run -p v1.1/tasks -a opencode -m openrouter/<vendor>/<model> --ak version=1.19.3 -k 3
+TASK=reka-ui-2954-select-space
+EFFORT=high
 ```
 
-`-k 3` runs three attempts per task (pass@3). For a provider that is not in the
-allowlist, add `--allow-agent-host <api-host>`.
+| Agent | `-a` | Auth | Effort | Extra hosts |
+|---|---|---|---|---|
+| Codex | `codex` | ChatGPT login (`~/.codex/auth.json`) or `OPENAI_API_KEY` | `--effort none\|minimal\|low\|medium\|high\|xhigh\|max` | `chatgpt.com`, `auth.openai.com` with the ChatGPT login |
+| Claude Code | `claude-code` | `CLAUDE_CODE_OAUTH_TOKEN` (subscription) or `ANTHROPIC_API_KEY` | `--effort low\|medium\|high\|xhigh\|max` | none |
+| Grok Build | `grok-build` | `XAI_API_KEY` | `--effort none\|minimal\|low\|medium\|high\|xhigh\|max` | `api.x.ai` |
+| OpenCode | `opencode` | provider API key env var | `--ak variant=<variant>` | the provider host, if not in the allowlist |
+| OpenCode, host login | `opencode_auth:OpenCodeAuth` | `opencode auth login` on the host | `--ak variant=<variant>` | the provider host, if not in the allowlist |
+
+Not every model accepts every effort level. An agent does not read your local CLI
+config, so it uses the model default when you do not give `--effort`.
+
+### Codex
+
+Harbor copies `~/.codex/auth.json` into the container, outside `/logs`, and deletes
+it after the run. Use `CODEX_AUTH_JSON_PATH=<path>` for a different file.
+
+```bash
+# One task
+CODEX_FORCE_AUTH_JSON=1 harbor run -p v1.1/tasks/$TASK \
+  -a codex -m openai/gpt-6.1-sol --ak version=0.164.0 --effort $EFFORT \
+  --allow-agent-host chatgpt.com --allow-agent-host auth.openai.com
+
+# All tasks
+CODEX_FORCE_AUTH_JSON=1 harbor run -p v1.1/tasks -n 1 \
+  -a codex -m openai/gpt-6.1-sol --ak version=0.164.0 --effort $EFFORT \
+  --allow-agent-host chatgpt.com --allow-agent-host auth.openai.com
+```
+
+`-n 1` runs one trial at a time. Codex can refresh the token in the container, and
+parallel refreshes make it more likely that your host login stops working. If it
+stops, run `codex login` again. With `OPENAI_API_KEY`, remove `CODEX_FORCE_AUTH_JSON`
+and the two `--allow-agent-host` options.
+
+### Claude Code
+
+Get a subscription token with `claude setup-token`.
+
+```bash
+export CLAUDE_CODE_OAUTH_TOKEN=... CLAUDE_FORCE_OAUTH=1
+
+# One task
+harbor run -p v1.1/tasks/$TASK -a claude-code -m anthropic/claude-sonnet-5-5 --effort $EFFORT
+
+# All tasks
+harbor run -p v1.1/tasks -a claude-code -m anthropic/claude-sonnet-5-5 --effort $EFFORT
+```
+
+With an API key, export `ANTHROPIC_API_KEY` and do not set the two OAuth variables.
+
+### Grok Build
+
+```bash
+export XAI_API_KEY=...
+
+# One task
+harbor run -p v1.1/tasks/$TASK -a grok-build -m xai/grok-4.7 --effort $EFFORT \
+  --allow-agent-host api.x.ai
+
+# All tasks
+harbor run -p v1.1/tasks -a grok-build -m xai/grok-4.7 --effort $EFFORT \
+  --allow-agent-host api.x.ai
+```
+
+### OpenCode
+
+Harbor installs `opencode-ai` in the task container and runs
+`opencode run --format=json`. Give the model as `provider/model` and export the API
+key of that provider. The variant names depend on the model (for example `high`).
+
+```bash
+export OPENROUTER_API_KEY=...
+
+# One task
+harbor run -p v1.1/tasks/$TASK -a opencode -m openrouter/moonshotai/kimi-k3 \
+  --ak version=1.19.3 --ak variant=$EFFORT
+
+# All tasks
+harbor run -p v1.1/tasks -a opencode -m openrouter/moonshotai/kimi-k3 \
+  --ak version=1.19.3 --ak variant=$EFFORT
+```
+
+### OpenCode with the host login
+
+`v1.1/agents/opencode_auth.py` reuses the credentials from `opencode auth login`
+(`~/.local/share/opencode/auth.json`, or `OPENCODE_AUTH_JSON_PATH`). No env var is
+needed. It copies only the entry of the model's provider into the container, outside
+`/logs`, and removes it after the run.
+
+```bash
+# One task
+PYTHONPATH=v1.1/agents harbor run -p v1.1/tasks/$TASK \
+  -a opencode_auth:OpenCodeAuth -m opencode-go/kimi-k3 \
+  --ak version=1.19.3 --ak variant=$EFFORT
+
+# All tasks
+PYTHONPATH=v1.1/agents harbor run -p v1.1/tasks \
+  -a opencode_auth:OpenCodeAuth -m opencode-go/kimi-k3 \
+  --ak version=1.19.3 --ak variant=$EFFORT
+```
+
+Tested with API-key logins (OpenCode Go, OpenRouter). OAuth logins (OpenAI) also need
+their auth hosts in `--allow-agent-host`, and a token refresh in the container can
+invalidate the host login. Do not use a Claude subscription login through OpenCode.
+Use the `claude-code` agent for it.
+
+### Test status
+
+All commands above pass `harbor run --dry-run`. Only the OpenCode agents were run
+against a real model. The runs authenticated, but they stopped on account problems
+(an expired OpenCode Go key, no OpenRouter credit), so no agent result is recorded yet.
+
+### Results
+
+Each job goes to `jobs/<timestamp>/`, or to the folder given with `-o`. In each trial:
+
+- `verifier/reward.txt`: 1 = solved, 0 = not solved.
+- `verifier/report.json`: which FAIL_TO_PASS and PASS_TO_PASS tests passed.
+- `result.json`: `exception_info` shows agent errors, such as a failed login.
+
+`harbor view jobs` opens a web view of the trials.
 
 ## Rebuild the tasks
 
@@ -148,7 +269,6 @@ To add a task, create `sources/<id>/source.toml` and `instruction.md`, then run
   uses the image Node 24.
 - The images are large (2.1 GB for reka-ui and pinia, 5 GB for vueuse). For many
   runs, push them to a registry and set `docker_image` in `task.toml`.
-- No paid OpenCode run was done in this PoC. Only the install step (`--install-only`)
-  was tested.
+- No agent run has finished yet. See [Test status](#test-status).
 - Contamination: there is no future Git history, and the PR host is blocked for the
   agent. Agent logs are not yet scanned for the PR URL or for parts of the fix.
