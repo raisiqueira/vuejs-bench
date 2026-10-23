@@ -1,0 +1,34 @@
+{
+  "fail_to_pass": [
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given autocomplete with cancel button and openOnFocus > should show all items after clearing a closed, blurred input (controlled)",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given autocomplete with cancel button and openOnFocus > should show all items after clearing a closed, blurred input (uncontrolled)"
+  ],
+  "pass_to_pass": [
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given autocomplete in a form > after selecting option and clicking submit button > should trigger submit once",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given autocomplete in a form > should have hidden input field",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > opening the popup > after selecting a value > after opening the popup again > should still show the selected text in the input",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > opening the popup > after selecting a value > should close the popup",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > opening the popup > after selecting a value > should emit `update:modelValue` with the text value",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > opening the popup > after selecting a value > should fill the input with the selected item text",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > opening the popup > data-empty attribute on content > should have data-empty when no items match the filter",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > opening the popup > data-empty attribute on content > should not have data-empty when items match",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > opening the popup > data-empty attribute on content > should remove data-empty when items match again",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > opening the popup > handle IME composition > on Android soft keyboard > should filter and update modelValue live during plain-text (autocorrect) composition",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > opening the popup > handle IME composition > on Android soft keyboard > should not filter during CJK IME composition until compositionend",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > opening the popup > handle IME composition > should filter after composition ends",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > opening the popup > handle IME composition > should not filter during composition",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > opening the popup > handle IME composition > should not filter during plain-text composition off Android (desktop Pinyin preedit)",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > opening the popup > handle IME composition > should not update modelValue during composition",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > opening the popup > handle IME composition > should update modelValue after composition ends",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > opening the popup > should keep input text on close (resetSearchTermOnBlur defaults to false)",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > opening the popup > should keep typed text as modelValue even when resetSearchTermOnBlur is true",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > opening the popup > should pass axe accessibility tests",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > opening the popup > should show the popup content",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > opening the popup > typing free-form text > should emit `update:modelValue` with the typed text",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > opening the popup > typing free-form text > should keep the typed text after closing",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > should have empty modelValue initially",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > should pass axe accessibility tests",
+    "packages/core/src/Autocomplete/Autocomplete.test.ts > given default Autocomplete > should show placeholder"
+  ],
+  "excluded": []
+}

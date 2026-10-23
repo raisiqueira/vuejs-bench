@@ -1,0 +1,30 @@
+[task]
+id = "reka-ui-2988-autocomplete-cancel"
+title = "Autocomplete: Cancel on a blurred input keeps the old filter"
+category = "behavior"
+difficulty = "medium"
+
+[source]
+repo = "unovue/reka-ui"
+issue = 2988
+pr = 2989
+fix_commit = "94965eed665a70e1e87a3ea01503b71bf1b1d174"
+base_commit = "1451c7acfc8967acb5f609ea69380527b5100441"
+issue_created_at = "2026-10-03T23:59:03Z"
+fix_merged_at = "2026-10-05T04:32:37Z"
+
+[runtime]
+pnpm = "10.13.1"
+
+[tests]
+workdir = "packages/core"
+config = "vite.config.ts"
+vitest_args = []
+protected = [
+  "package.json",
+  "packages/core/package.json",
+  "packages/core/vite.config.ts",
+  "packages/core/vitest.global.ts",
+  "packages/core/vitest.setup.ts",
+  "packages/core/src/test",
+]

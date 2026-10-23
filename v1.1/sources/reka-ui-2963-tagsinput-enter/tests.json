@@ -1,0 +1,38 @@
+{
+  "fail_to_pass": [
+    "packages/core/src/TagsInput/TagsInput.test.ts > given TagsInput inside a form > prevents implicit submission synchronously and adds the draft"
+  ],
+  "pass_to_pass": [
+    "packages/core/src/TagsInput/TagsInput.test.ts > given TagsInput inside a form > does not prevent submission when the draft is empty",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given TagsInput inside a form > lets a consumer `@keydown.enter.prevent` opt out of adding the draft",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given TagsInput with a disabled item before a removable one > does not remove the disabled tag when it is the only remaining tag",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given TagsInput with a disabled item before a removable one > removes the selected removable tag, not the disabled one",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given a TagsInput with objects > given a TagsInput with delimiter > should add multiple tags on pasting text with multiple delimiter characters",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given a TagsInput with objects > given a TagsInput with delimiter > should add multiple tags on pasting text with single delimiter character",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given a TagsInput with objects > given a TagsInput with delimiter > should add tag on typing multiple delimiter characters",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given a TagsInput with objects > given a TagsInput with delimiter > should add tag on typing single delimiter character",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given a TagsInput with objects > given a TagsInput with delimiter > should not create tag when delimiter is typed during IME composition",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given a TagsInput with objects > given a TagsInput with delimiter > should process value after composition ends",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given a TagsInput with objects > should be able to convert the value > should display the initial tags",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given a TagsInput with objects > should be able to convert the value > should update the tags",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given a TagsInput with objects > should throw an error if props are not ok",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given default TagsInput > adding values on user actions > should add value on blur",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given default TagsInput > adding values on user actions > should add value on keydown:enter",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given default TagsInput > adding values on user actions > should add value on keydown:tab",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given default TagsInput > after adding new value > after pressing on ArrowLeft on input > after pressing on Backspace > should remove the active tag",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given default TagsInput > after adding new value > after pressing on ArrowLeft on input > after pressing on Backspace > should select the new last tag",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given default TagsInput > after adding new value > after pressing on ArrowLeft on input > after pressing on Backspace > should trigger `removeTag` event",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given default TagsInput > after adding new value > after pressing on ArrowLeft on input > should remove active state when press ArrowRight",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given default TagsInput > after adding new value > after pressing on ArrowLeft on input > should select the first item when press Home",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given default TagsInput > after adding new value > after pressing on ArrowLeft on input > should select the last item when press End",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given default TagsInput > after adding new value > after pressing on ArrowLeft on input > should select the last tags",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given default TagsInput > after adding new value > after pressing on ArrowLeft on input > should select the previous tag when press ArrowLeft",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given default TagsInput > after adding new value > should add a new tag",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given default TagsInput > after adding new value > should clear off the value in input",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given default TagsInput > after adding new value > should emit `addTag` event",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given default TagsInput > after adding new value > should have focus on input",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given default TagsInput > should pass axe accessibility tests",
+    "packages/core/src/TagsInput/TagsInput.test.ts > given default TagsInput > should render the initial tags"
+  ],
+  "excluded": []
+}

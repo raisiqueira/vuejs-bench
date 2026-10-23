@@ -1,0 +1,28 @@
+[task]
+id = "pinia-3161-hydration-set-map"
+title = "Pinia: SSR hydration merges reactive Set/Map defaults into server state"
+category = "state"
+difficulty = "medium"
+
+[source]
+repo = "vuejs/pinia"
+issue = 3161
+pr = 3162
+fix_commit = "5bdf26c702999921a08ce8361f865fdc78c6dfb7"
+base_commit = "ee1a590d82425e511db62d108df58bd0b4258ebe"
+issue_created_at = "2026-07-17T00:05:00Z"
+fix_merged_at = "2026-07-17T09:01:59Z"
+
+[runtime]
+pnpm = "11.7.0"
+
+[tests]
+workdir = "."
+config = "vitest.config.ts"
+vitest_args = ["--project", "pinia", "--coverage.enabled=false"]
+protected = [
+  "package.json",
+  "packages/pinia/package.json",
+  "vitest.config.ts",
+  "packages/pinia/__tests__/vitest-setup.ts",
+]

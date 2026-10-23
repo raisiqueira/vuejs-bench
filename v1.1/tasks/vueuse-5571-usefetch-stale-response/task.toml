@@ -1,0 +1,34 @@
+schema_version = "1.4"
+
+[task]
+name = "vuebench/vueuse-5571-usefetch-stale-response"
+version = "1.1.0-poc"
+description = "useFetch: a superseded request overwrites newer data"
+keywords = ["vue", "vueuse", "reactivity"]
+
+[metadata]
+difficulty = "medium"
+category = "reactivity"
+source_repo = "vueuse/vueuse"
+issue_url = "https://github.com/vueuse/vueuse/issues/5571"
+pr_url = "https://github.com/vueuse/vueuse/pull/5574"
+base_commit = "83e0043828c00cfbbba9fd310ecd59c5fba14db0"
+fix_commit = "a4368f57db9f7c6b51c91f594c63417a9f3f4d29"
+issue_created_at = "2026-08-09T03:57:01Z"
+fix_merged_at = "2026-08-13T02:02:24Z"
+
+[environment]
+# Public only for image build and agent install; each phase narrows it below.
+network_mode = "public"
+build_timeout_sec = 1800.0
+cpus = 2
+memory_mb = 4096
+
+[agent]
+timeout_sec = 900.0
+network_mode = "allowlist"
+allowed_hosts = ["api.anthropic.com", "api.openai.com", "openrouter.ai", "opencode.ai", "models.dev"]
+
+[verifier]
+timeout_sec = 600.0
+network_mode = "no-network"
